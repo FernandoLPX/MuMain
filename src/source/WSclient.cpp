@@ -1069,11 +1069,10 @@ void ReceiveMagicList(const BYTE* ReceiveBuffer)
     }
     else
     {
-        if (Data->ListType == 0x00)
-        {
-            ZeroMemory(CharacterAttribute->Skill, MAX_SKILLS * sizeof(WORD));
-            ZeroMemory(CharacterAttribute->SkillLevel, MAX_SKILLS * sizeof(BYTE));
-        }
+        // Treat unknown ListType as full list update to keep skill state consistent.
+        ZeroMemory(CharacterAttribute->Skill, MAX_SKILLS * sizeof(WORD));
+        ZeroMemory(CharacterAttribute->SkillLevel, MAX_SKILLS * sizeof(BYTE));
+
         for (int i = 0; i < Data->Value; i++)
         {
             auto Data2 = (LPPRECEIVE_MAGIC_LIST)(ReceiveBuffer + Offset);
