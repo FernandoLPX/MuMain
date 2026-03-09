@@ -59,10 +59,20 @@ jobs:
       - name: Build
         run: |
           cmake --build build-mingw -j$(nproc)
+
+      - name: Verify required runtime files
+        run: |
+          test -f build-mingw/src/Main.exe
+          if [ ! -f build-mingw/src/MUnique.Client.Library.dll ]; then
+            echo "ERROR: MUnique.Client.Library.dll missing in build output."
+            echo "This MinGW/Linux build cannot produce a runnable OpenMU client in this setup."
+            echo "Use the Windows workflow 'CI Build (Windows x64 Release)' to generate a runnable package."
+            exit 1
+          fi
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: main-exe-mingw
-          path: build-mingw/src/Main.exe
+          name: mumain-mingw-build
+          path: build-mingw/src/
           if-no-files-found: error

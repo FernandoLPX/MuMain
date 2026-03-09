@@ -1,0 +1,57 @@
+name: CI Build (Windows x64 Release)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-x64-release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC environment (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: .nuget
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Configure CMake preset (windows-x64)
+        run: cmake --preset windows-x64
+
+      - name: Build preset (windows-x64-release)
+        run: cmake --build --preset windows-x64-release
+
+      - name: Verify release output exists
+        shell: pwsh
+        run: |
+          $outDir = "out/build/windows-x64/src/Release"
+          if (-not (Test-Path "$outDir/Main.exe")) {
+            Write-Error "Main.exe nao encontrado em $outDir"
+          }
+          if (-not (Test-Path "$outDir/MUnique.Client.Library.dll")) {
+            Write-Error "MUnique.Client.Library.dll nao encontrada em $outDir"
+          }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumain-windows-x64-release-${{ github.sha }}
+          path: out/build/windows-x64/src/Release/
+          if-no-files-found: error

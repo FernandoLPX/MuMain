@@ -1,0 +1,77 @@
+name: Release (Windows x64)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC environment (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: .nuget
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Configure CMake preset (windows-x64)
+        run: cmake --preset windows-x64
+
+      - name: Build preset (windows-x64-release)
+        run: cmake --build --preset windows-x64-release
+
+      - name: Package release files
+        id: package
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $outDir = "out/build/windows-x64/src/Release"
+          $packageName = "MuMain-$tag-windows-x64-release.zip"
+
+          if (-not (Test-Path "$outDir/Main.exe")) {
+            Write-Error "Main.exe nao encontrado em $outDir"
+          }
+          if (-not (Test-Path "$outDir/MUnique.Client.Library.dll")) {
+            Write-Error "MUnique.Client.Library.dll nao encontrada em $outDir"
+          }
+
+          Compress-Archive -Path "$outDir/*" -DestinationPath $packageName -Force
+          "package_name=$packageName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumain-release-${{ github.ref_name }}
+          path: ${{ steps.package.outputs.package_name }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.package_name }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
