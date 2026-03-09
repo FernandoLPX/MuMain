@@ -55,3 +55,20 @@ jobs:
           name: mumain-windows-x86-release-${{ github.sha }}
           path: out/build/windows-x86/src/Release/
           if-no-files-found: error
+
+      - name: Prepare lightweight patch artifact
+        shell: pwsh
+        run: |
+          $outDir = "out/build/windows-x86/src/Release"
+          $patchDir = "out/build/windows-x86/patch"
+          New-Item -ItemType Directory -Force -Path $patchDir | Out-Null
+
+          Copy-Item "$outDir/Main.exe" "$patchDir/Main.exe" -Force
+          Copy-Item "$outDir/MUnique.Client.Library.dll" "$patchDir/MUnique.Client.Library.dll" -Force
+
+      - name: Upload lightweight patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumain-windows-x86-patch-${{ github.sha }}
+          path: out/build/windows-x86/patch/
+          if-no-files-found: error
