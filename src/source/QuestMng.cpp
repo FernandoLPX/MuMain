@@ -818,8 +818,8 @@ void CQuestMng::SendQuestIndexByEtcSelection()
         return;
 
     auto iter = m_listQuestIndexByEtc.begin();
-    const auto questNumber = static_cast<uint16_t>((*iter & 0xFF00) >> 16);
-    const auto questGroup = static_cast<uint16_t>(*iter & 0xFF);
+    const auto questNumber = static_cast<uint16_t>((*iter & 0xFFFF0000u) >> 16);
+    const auto questGroup = static_cast<uint16_t>(*iter & 0xFFFFu);
     SocketClient->ToGameServer()->SendQuestSelectRequest(questNumber, questGroup, 0);
 }
 

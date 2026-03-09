@@ -557,8 +557,8 @@ void CNewUINPCDialogue::ProcessSelTextResult()
         }
         else
         {
-            auto questNumber = (uint16_t)((m_adwQuestIndex[m_nSelSelText - 1] & 0xFF00) >> 16);
-            auto questGroup = (uint16_t)(m_adwQuestIndex[m_nSelSelText - 1] & 0xFF);
+            auto questNumber = static_cast<uint16_t>((m_adwQuestIndex[m_nSelSelText - 1] & 0xFFFF0000u) >> 16);
+            auto questGroup = static_cast<uint16_t>(m_adwQuestIndex[m_nSelSelText - 1] & 0xFFFFu);
             SocketClient->ToGameServer()->SendQuestSelectRequest(questNumber, questGroup, (BYTE)m_nSelSelText);
         }
     }
