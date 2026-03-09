@@ -1,9 +1,7 @@
 name: MinGW Cross-Compilation Build (Dev)
 
 on:
-  push:
-    branches-ignore:
-      - main
+  workflow_dispatch:
 
 jobs:
   build-mingw:
