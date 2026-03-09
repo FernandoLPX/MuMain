@@ -1,10 +1,10 @@
-name: CI Build (Windows x64 Release)
+name: CI Build (Windows x86 Release)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-windows-x64-release:
+  build-windows-x86-release:
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -14,10 +14,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup MSVC environment (x64)
+      - name: Setup MSVC environment (x86)
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: x64
+          arch: x86
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -32,16 +32,16 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Configure CMake preset (windows-x64)
-        run: cmake --preset windows-x64
+      - name: Configure CMake preset (windows-x86)
+        run: cmake --preset windows-x86
 
-      - name: Build preset (windows-x64-release)
-        run: cmake --build --preset windows-x64-release
+      - name: Build preset (windows-x86-release)
+        run: cmake --build --preset windows-x86-release
 
       - name: Verify release output exists
         shell: pwsh
         run: |
-          $outDir = "out/build/windows-x64/src/Release"
+          $outDir = "out/build/windows-x86/src/Release"
           if (-not (Test-Path "$outDir/Main.exe")) {
             Write-Error "Main.exe nao encontrado em $outDir"
           }
@@ -52,6 +52,6 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mumain-windows-x64-release-${{ github.sha }}
-          path: out/build/windows-x64/src/Release/
+          name: mumain-windows-x86-release-${{ github.sha }}
+          path: out/build/windows-x86/src/Release/
           if-no-files-found: error

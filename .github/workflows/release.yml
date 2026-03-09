@@ -1,4 +1,4 @@
-name: Release (Windows x64)
+name: Release (Windows x86)
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  release-windows-x64:
+  release-windows-x86:
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -19,10 +19,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup MSVC environment (x64)
+      - name: Setup MSVC environment (x86)
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: x64
+          arch: x86
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -37,19 +37,19 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Configure CMake preset (windows-x64)
-        run: cmake --preset windows-x64
+      - name: Configure CMake preset (windows-x86)
+        run: cmake --preset windows-x86
 
-      - name: Build preset (windows-x64-release)
-        run: cmake --build --preset windows-x64-release
+      - name: Build preset (windows-x86-release)
+        run: cmake --build --preset windows-x86-release
 
       - name: Package release files
         id: package
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          $outDir = "out/build/windows-x64/src/Release"
-          $packageName = "MuMain-$tag-windows-x64-release.zip"
+          $outDir = "out/build/windows-x86/src/Release"
+          $packageName = "MuMain-$tag-windows-x86-release.zip"
 
           if (-not (Test-Path "$outDir/Main.exe")) {
             Write-Error "Main.exe nao encontrado em $outDir"
