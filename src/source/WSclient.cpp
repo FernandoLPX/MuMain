@@ -1064,6 +1064,7 @@ void ReceiveMagicList(const BYTE* ReceiveBuffer)
             auto Data2 = (LPPRECEIVE_MAGIC_LIST)(ReceiveBuffer + Offset);
             CharacterAttribute->Skill[Data2->Index] = AT_SKILL_UNDEFINED;
             CharacterAttribute->SkillLevel[Data2->Index] = 0;
+            Offset += sizeof(PRECEIVE_MAGIC_LIST);
         }
     }
     else
