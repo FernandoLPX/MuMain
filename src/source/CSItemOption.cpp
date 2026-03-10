@@ -705,6 +705,22 @@ bool CSItemOption::IsNonWeaponSkillOrIsSkillEquipped(ActionSkillType skill)
         return true;
     }
 
+    // If the skill is already in the learned skill list, treat it as available.
+    // Some client data paths don't populate weapon Special[] with the same ids.
+    for (int i = 0; i < MAX_SKILLS; ++i)
+    {
+        const auto learnedSkill = CharacterAttribute->Skill[i];
+        if (learnedSkill == AT_SKILL_UNDEFINED)
+        {
+            continue;
+        }
+
+        if (learnedSkill == skill || gSkillManager.MasterSkillToBaseSkillIndex(learnedSkill) == baseSkill)
+        {
+            return true;
+        }
+    }
+
     for (int i = 0; i < 2; i++)
     {
         const ITEM* item = &CharacterMachine->Equipment[EQUIPMENT_WEAPON_RIGHT + i];
