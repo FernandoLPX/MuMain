@@ -241,12 +241,12 @@ void CSkillManager::RebuildSkillRequirementsCache()
     const bool isGuardian = gMapManager.IsEmpireGuardian();
 
     DemendConditionInfo heroCharacterInfo;
-    heroCharacterInfo.SkillLevel = CharacterMachine->Character.Level;
-    heroCharacterInfo.SkillStrength = CharacterMachine->Character.Strength + CharacterMachine->Character.AddStrength;
-    heroCharacterInfo.SkillDexterity = CharacterMachine->Character.Dexterity + CharacterMachine->Character.AddDexterity;
-    heroCharacterInfo.SkillVitality = CharacterMachine->Character.Vitality + CharacterMachine->Character.AddVitality;
-    heroCharacterInfo.SkillEnergy = CharacterMachine->Character.Energy + CharacterMachine->Character.AddEnergy;
-    heroCharacterInfo.SkillCharisma = CharacterMachine->Character.Charisma + CharacterMachine->Character.AddCharisma;
+    heroCharacterInfo.SkillLevel = CharacterAttribute->Level;
+    heroCharacterInfo.SkillStrength = CharacterAttribute->Strength + CharacterAttribute->AddStrength;
+    heroCharacterInfo.SkillDexterity = CharacterAttribute->Dexterity + CharacterAttribute->AddDexterity;
+    heroCharacterInfo.SkillVitality = CharacterAttribute->Vitality + CharacterAttribute->AddVitality;
+    heroCharacterInfo.SkillEnergy = CharacterAttribute->Energy + CharacterAttribute->AddEnergy;
+    heroCharacterInfo.SkillCharisma = CharacterAttribute->Charisma + CharacterAttribute->AddCharisma;
 
     for (int skillType = 0; skillType < MAX_SKILLS; ++skillType)
     {
