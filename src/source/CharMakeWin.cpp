@@ -37,7 +37,7 @@ namespace
         20, 21, 22, 23, 24, 1687, 3150
     };
 
-    constexpr std::size_t kMinCharacterNameLength = 4;
+    constexpr std::size_t kMinCharacterNameLength = 3;
 
     constexpr int kSummonerDescriptionTextId = 1690;
     constexpr int kRageFighterDescriptionTextId = 3152;
