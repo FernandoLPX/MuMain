@@ -25,7 +25,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   buff direto no dialogo
 - **Infra:** `docker-compose.build.yml` e `docker/mingw-builder.Dockerfile`
   para build cross-compilado via Docker
-- **Docs:** `README.md` com workflows de CI/CD
+- **CI/CD:** workflow de build manual do MuMain (`.github/workflows/build.yml`)
+- **CI/CD:** workflow de build Windows com artefato (`ci-build.yml`)
+- **CI/CD:** workflow de release automatica ao criar tag (`release.yml`)
+- **CI/CD:** workflow de build MinGW para desenvolvimento (`mingw-build.yml`,
+  `mingw-build-dev.yml`)
+- **CI/CD:** artefato leve de patch para atualizacoes mais rapidas do cliente
+- **Docs:** `README.md` com secoes de CI/CD e instrucoes de build
 - **Docs:** este arquivo `CHANGELOG.md`
 
 ### Corrigido
@@ -50,11 +56,29 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `m_wQuestCount` contra tamanho real do pacote
 - **Quest (WSclient):** `ReceiveQuestQSRequestReward`/`ReceiveProgressQuestRequestReward`
   com validacao de tamanho de pacote antes de processar
+- **Quest:** `SendQuestSelectRequest()` e `SendQuestIndexByEtcSelection()`
+  enviavam questNumber/questGroup com os nibbles trocados (LOWORD vs HIWORD)
+- **Skill (ReceiveMagicList):** faltava `Offset += 7;` no branch `ListType 0x02`,
+  causando leitura incorreta de skills subsequentes
+- **Skill (WSclient):** `ReceiveMagicList()` nao reconstruia a lista de skills
+  ao receber atualizacao completa (`ListType == 0`), deixando skills obsoletas
+  ativas
+- **Skill (CSItemOption):** `IsNonWeaponSkillOrIsSkillEquipped()` nao verificava
+  se a skill ja estava na lista de skills aprendidas, impedindo uso de skills
+  de arma que o cliente nao associava ao item equipado
+- **Skill (SkillManager):** verificacao de requisitos de skill usava as
+  estruturas de classe diretamente, sem normalizar via `CharacterAttribute`,
+  causando falso-negativo em algumas condicoes
 - **NPC Dialogue:** `SetCurNPCWords()` com protecao contra `pszSrc == NULL`
 - **NPC Dialogue:** `SetQuestListText()` com clamping de `nIndexCount` e
   protecao contra `adwSrcQuestIndex == nullptr`
 
 ### Alterado
 
+- **Nomes de personagem:** permitido uso de underscore (`_`) e tamanho minimo
+  reduzido para 3 caracteres (`CharMakeWin.cpp`, `Local.cpp`)
+- **CI/CD:** workflows migrados de MSBuild para MinGW (cross-compile)
+- **CI/CD:** builds Windows alterados de x64 para x86 (compatibilidade com
+  cliente original)
 - **Quest:** bitfields de `questNumber`/`questGroup` normalizados em todo o
   codigo: `questNumber = index & 0xFFFF`, `questGroup = (index & 0xFFFF0000) >> 16`
