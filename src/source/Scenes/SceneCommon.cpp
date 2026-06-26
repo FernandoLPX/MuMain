@@ -247,8 +247,8 @@ void SetViewPortLevel(int Wheel)
 
         if (g_shCameraLevel > 4)
             g_shCameraLevel = 4;
-        if (g_shCameraLevel < 0)
-            g_shCameraLevel = 0;
+        if (g_shCameraLevel < -4)
+            g_shCameraLevel = -4;
     }
 }
 

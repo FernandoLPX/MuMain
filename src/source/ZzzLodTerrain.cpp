@@ -2043,7 +2043,10 @@ void CreateFrustrum2D(vec3_t Position)
         static  int CameraLevel;
 
         if ((int)CameraDistanceTarget >= (int)CameraDistance)
+        {
             CameraLevel = g_shCameraLevel;
+            if (CameraLevel < 0) CameraLevel = 0;
+        }
 
         switch (CameraLevel)
         {

@@ -27,6 +27,10 @@ extern float CameraDistance;
 extern float Camera3DFov;
 extern bool Camera3DRoll;
 
+// Offset vertical para centralizar a camera no corpo do personagem ao inves dos pes.
+// Ajuste este valor (80-120) conforme preferencia visual.
+static const float CAMERA_BODY_OFFSET = 80.f;
+
 /**
  * @brief Calculates camera view distance based on scene and world settings.
  */
@@ -147,7 +151,6 @@ static void CalculateCameraPosition(vec3_t outCameraPosition)
     {
         g_shCameraLevel = 5;
     }
-    else g_shCameraLevel = 0;
 
     if (CCameraMove::GetInstancePtr()->IsTourMode())
     {
@@ -163,14 +166,14 @@ static void CalculateCameraPosition(vec3_t outCameraPosition)
     }
     else if (!CCameraMove::GetInstancePtr()->IsTourMode())
     {
-        outCameraPosition[2] = Hero->Object.Position[2];
+        outCameraPosition[2] = Hero->Object.Position[2] + CAMERA_BODY_OFFSET;
     }
 
     if ((TerrainWall[iIndex] & TW_HEIGHT) == TW_HEIGHT)
     {
         outCameraPosition[2] = g_fSpecialHeight = 1200.f + 1;
     }
-    outCameraPosition[2] += CameraDistance - 150.f;
+    outCameraPosition[2] += CameraDistance * 0.85f;
 
     // Apply custom camera distance for special terrain
     if (g_fCameraCustomDistance != 0.f)
@@ -261,6 +264,10 @@ static void UpdateCameraDistance()
         {
             switch (g_shCameraLevel)
             {
+            case -4: CameraDistanceTarget = 600.f; break;
+            case -3: CameraDistanceTarget = 700.f; break;
+            case -2: CameraDistanceTarget = 800.f; break;
+            case -1: CameraDistanceTarget = 900.f; break;
             case 0: CameraDistanceTarget = 1000.f; break;
             case 1: CameraDistanceTarget = 1100.f; break;
             case 2: CameraDistanceTarget = 1200.f; break;
