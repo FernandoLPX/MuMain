@@ -5819,8 +5819,8 @@ BOOL CUICurQuestListBox::DoLineMouseAction(int iLineNumber)
             g_pMyQuestInfoWindow->QuestGiveUpBtnEnable(true);
             g_pMyQuestInfoWindow->SetSelQuestSummary();
 
-            const auto questNumber = static_cast<uint16_t>((m_TextListIter->m_dwIndex & 0xFF00) >> 16);
-            const auto questGroup = static_cast<uint16_t>(m_TextListIter->m_dwIndex & 0xFF);
+            const auto questNumber = static_cast<uint16_t>(m_TextListIter->m_dwIndex & 0xFFFFu);
+            const auto questGroup = static_cast<uint16_t>((m_TextListIter->m_dwIndex & 0xFFFF0000u) >> 16);
             SocketClient->ToGameServer()->SendQuestStateRequest(questNumber, questGroup);
         }
     }

@@ -334,8 +334,14 @@ short   CSQuest::FindQuestContext(QUEST_ATTRIBUTE* pQuest, int index)
         }
     }
 
-    m_byCurrQuestIndex--;
-    CheckQuestState();
+    // Some NPC interactions can reach a quest index without a valid context for
+    // the current class. m_byCurrQuestIndex is uint8_t, so decrementing at 0
+    // wraps to 255 and can crash on the next quest array access.
+    if (m_byCurrQuestIndex > 0)
+    {
+        m_byCurrQuestIndex--;
+        CheckQuestState();
+    }
 
     return m_shCurrPage;
 }

@@ -252,6 +252,40 @@ rm -rf build
 
 ---
 
+### GitHub Actions (CI + Release)
+
+This fork includes workflows for Windows x64 Release builds.
+
+#### Manual CI Build (artifact)
+
+Workflow file: `.github/workflows/ci-build.yml`
+
+1. Open the repository on GitHub.
+2. Go to **Actions**.
+3. Select **CI Build (Windows x64 Release)**.
+4. Click **Run workflow**.
+5. After completion, download artifact `mumain-windows-x64-release-<sha>`.
+
+The artifact contains everything from `out/build/windows-x64/src/Release/`.
+
+#### Automatic Release on Tag
+
+Workflow file: `.github/workflows/release.yml`
+
+When you push a tag that starts with `v` (example: `v1.0.0`), GitHub Actions will:
+
+1. Build `windows-x64-release`.
+2. Create zip package `MuMain-<tag>-windows-x64-release.zip`.
+3. Create/update a GitHub Release for the tag.
+4. Attach the package to the release.
+
+Example commands:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
 ### Running the Client
 
 It supports the common starting parameters `/u` and `/p`, example: `main.exe connect /u192.168.0.20 /p55902`.

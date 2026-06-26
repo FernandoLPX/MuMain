@@ -2436,8 +2436,9 @@ bool SEASON3B::CQuestGiveUpMsgBoxLayout::SetLayout()
 
 CALLBACK_RESULT SEASON3B::CQuestGiveUpMsgBoxLayout::OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
 {
-    const auto questNumber = static_cast<uint16_t>((g_pMyQuestInfoWindow->GetSelQuestIndex() & 0xFF00) >> 16);
-    const auto questGroup = static_cast<uint16_t>(g_pMyQuestInfoWindow->GetSelQuestIndex() & 0xFF);
+    const auto questIndex = g_pMyQuestInfoWindow->GetSelQuestIndex();
+    const auto questNumber = static_cast<uint16_t>(questIndex & 0xFFFFu);
+    const auto questGroup = static_cast<uint16_t>((questIndex & 0xFFFF0000u) >> 16);
     SocketClient->ToGameServer()->SendQuestCancelRequest(questNumber, questGroup);
 
     PlayBuffer(SOUND_CLICK01);

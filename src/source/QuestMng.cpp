@@ -141,9 +141,28 @@ void CQuestMng::LoadQuestWordsScript()
 
 void CQuestMng::SetQuestRequestReward(const BYTE* pbyRequestRewardPacket)
 {
-    auto pRequestRewardPacket
-        = (LPPMSG_NPC_QUESTEXP_INFO)pbyRequestRewardPacket;
-    DWORD dwQuestIndex = pRequestRewardPacket->m_dwQuestIndex;
+    constexpr int QuestExpHeaderSize = 11;
+    constexpr int QuestRequestEntrySize = 26;
+    constexpr int QuestRewardEntrySize = 22;
+    constexpr int QuestEntryCount = 5;
+
+    auto read_u16 = [](const BYTE* src) -> WORD
+        {
+            return static_cast<WORD>(src[0] | (src[1] << 8));
+        };
+
+    auto read_u32 = [](const BYTE* src) -> DWORD
+        {
+            return static_cast<DWORD>(src[0])
+                | (static_cast<DWORD>(src[1]) << 8)
+                | (static_cast<DWORD>(src[2]) << 16)
+                | (static_cast<DWORD>(src[3]) << 24);
+        };
+
+    const BYTE requestCount = pbyRequestRewardPacket[4];
+    const BYTE rewardCount = pbyRequestRewardPacket[5];
+    const BYTE randRewardCount = pbyRequestRewardPacket[6];
+    DWORD dwQuestIndex = read_u32(pbyRequestRewardPacket + 7);
     int i;
 
     const SQuestRequestReward* pOldRequestReward = GetRequestReward(dwQuestIndex);
@@ -160,71 +179,75 @@ void CQuestMng::SetQuestRequestReward(const BYTE* pbyRequestRewardPacket)
     SQuestRequestReward sRequestReward;
     ::memset(&sRequestReward, 0, sizeof(SQuestRequestReward));
 
-    auto pRequestPacket
-        = (LPNPC_QUESTEXP_REQUEST_INFO)(pbyRequestRewardPacket + sizeof(PMSG_NPC_QUESTEXP_INFO));
+    const BYTE* requestBase = pbyRequestRewardPacket + QuestExpHeaderSize;
 
-    if (pRequestPacket->m_dwType == QUEST_REQUEST_NONE || pRequestRewardPacket->m_byRequestCount == 0)
+    if (requestBase[0] == QUEST_REQUEST_NONE || requestCount == 0)
     {
         sRequestReward.m_byRequestCount = 1;
     }
     else
     {
-        sRequestReward.m_byRequestCount = pRequestRewardPacket->m_byRequestCount;
+        sRequestReward.m_byRequestCount = std::min<BYTE>(requestCount, QuestEntryCount);
         for (i = 0; i < sRequestReward.m_byRequestCount; ++i)
         {
-            sRequestReward.m_aRequest[i].m_dwType = pRequestPacket->m_dwType;
-            sRequestReward.m_aRequest[i].m_wIndex = pRequestPacket->m_wIndex;
-            sRequestReward.m_aRequest[i].m_dwValue = pRequestPacket->m_dwValue;
+            const BYTE* requestEntry = requestBase + (i * QuestRequestEntrySize);
+
+            sRequestReward.m_aRequest[i].m_dwType = requestEntry[0];
+            sRequestReward.m_aRequest[i].m_wIndex = read_u16(requestEntry + 1);
+            sRequestReward.m_aRequest[i].m_dwValue = read_u32(requestEntry + 3);
 #ifdef ASG_ADD_TIME_LIMIT_QUEST
-            sRequestReward.m_aRequest[i].m_dwCurValue = pRequestPacket->m_dwCurValue;
+            sRequestReward.m_aRequest[i].m_dwCurValue = read_u32(requestEntry + 7);
 #else	// ASG_ADD_TIME_LIMIT_QUEST
-            sRequestReward.m_aRequest[i].m_wCurValue = pRequestPacket->m_wCurValue;
+            sRequestReward.m_aRequest[i].m_wCurValue = static_cast<WORD>(read_u32(requestEntry + 7));
 #endif	// ASG_ADD_TIME_LIMIT_QUEST
-            if (pRequestPacket->m_dwType == QUEST_REQUEST_ITEM)
+            if (requestEntry[0] == QUEST_REQUEST_ITEM)
                 sRequestReward.m_aRequest[i].m_pItem
-                = g_pNewItemMng->CreateItemOld(pRequestPacket->m_byItemInfo);
-            ++pRequestPacket;
+                = g_pNewItemMng->CreateItemOld(std::span<const BYTE>(requestEntry + 11, PACKET_ITEM_LENGTH_EXTENDED_MAX));
         }
     }
 
-    auto pRewardPacket = (LPNPC_QUESTEXP_REWARD_INFO)(pbyRequestRewardPacket + sizeof(PMSG_NPC_QUESTEXP_INFO) + sizeof(NPC_QUESTEXP_REQUEST_INFO) * 5);
+    const BYTE* rewardBase = pbyRequestRewardPacket + QuestExpHeaderSize + (QuestRequestEntrySize * QuestEntryCount);
 
-    if (pRewardPacket->m_dwType == QUEST_REWARD_NONE || pRequestRewardPacket->m_byRewardCount == 0)
+    if (rewardBase[0] == QUEST_REWARD_NONE || rewardCount == 0)
     {
         sRequestReward.m_byGeneralRewardCount = 1;
     }
     else
     {
-        sRequestReward.m_byRandGiveCount = pRequestRewardPacket->m_byRandRewardCount;
+        sRequestReward.m_byRandGiveCount = std::min<BYTE>(randRewardCount, QuestEntryCount);
+        const BYTE byRewardCount = std::min<BYTE>(rewardCount, QuestEntryCount);
 
         BYTE byGeneralCount = 0;
         BYTE byRandCount = 0;
         SQuestReward aTempRandReward[5];
         ::memset(aTempRandReward, 0, sizeof(SQuestReward) * 5);
 
-        for (i = 0; i < pRequestRewardPacket->m_byRewardCount; ++i)
+        for (i = 0; i < byRewardCount; ++i)
         {
-            if (QUEST_REWARD_TYPE(pRewardPacket->m_dwType & 0xFFE0) == QUEST_REWARD_RANDOM)
+            const BYTE* rewardEntry = rewardBase + (i * QuestRewardEntrySize);
+            const DWORD rewardType = rewardEntry[0];
+            const WORD rewardIndex = read_u16(rewardEntry + 1);
+            const DWORD rewardValue = read_u32(rewardEntry + 3);
+
+            if (QUEST_REWARD_TYPE(rewardType & 0xFFE0) == QUEST_REWARD_RANDOM && byRandCount < 5)
             {
-                aTempRandReward[byRandCount].m_dwType = pRewardPacket->m_dwType & 0x1F;
-                aTempRandReward[byRandCount].m_wIndex = pRewardPacket->m_wIndex;
-                aTempRandReward[byRandCount].m_dwValue = pRewardPacket->m_dwValue;
+                aTempRandReward[byRandCount].m_dwType = rewardType & 0x1F;
+                aTempRandReward[byRandCount].m_wIndex = rewardIndex;
+                aTempRandReward[byRandCount].m_dwValue = rewardValue;
                 if (aTempRandReward[byRandCount].m_dwType == QUEST_REWARD_ITEM)
                     aTempRandReward[byRandCount].m_pItem
-                    = g_pNewItemMng->CreateItemOld(pRewardPacket->m_byItemInfo);
+                    = g_pNewItemMng->CreateItemOld(std::span<const BYTE>(rewardEntry + 7, PACKET_ITEM_LENGTH_EXTENDED_MAX));
                 ++byRandCount;
             }
-            else
+            else if (byGeneralCount < 5)
             {
-                sRequestReward.m_aReward[byGeneralCount].m_dwType = pRewardPacket->m_dwType;
-                sRequestReward.m_aReward[byGeneralCount].m_wIndex = pRewardPacket->m_wIndex;
-                sRequestReward.m_aReward[byGeneralCount].m_dwValue = pRewardPacket->m_dwValue;
-                if (pRewardPacket->m_dwType == QUEST_REWARD_ITEM)
-                    sRequestReward.m_aReward[byGeneralCount].m_pItem = g_pNewItemMng->CreateItemOld(pRewardPacket->m_byItemInfo);
+                sRequestReward.m_aReward[byGeneralCount].m_dwType = rewardType;
+                sRequestReward.m_aReward[byGeneralCount].m_wIndex = rewardIndex;
+                sRequestReward.m_aReward[byGeneralCount].m_dwValue = rewardValue;
+                if (rewardType == QUEST_REWARD_ITEM)
+                    sRequestReward.m_aReward[byGeneralCount].m_pItem = g_pNewItemMng->CreateItemOld(std::span<const BYTE>(rewardEntry + 7, PACKET_ITEM_LENGTH_EXTENDED_MAX));
                 ++byGeneralCount;
             }
-
-            ++pRewardPacket;
         }
 
         sRequestReward.m_byGeneralRewardCount = byGeneralCount;

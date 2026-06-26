@@ -375,6 +375,7 @@ void CNewUINPCDialogue::UnloadImages()
 void CNewUINPCDialogue::ProcessOpening()
 {
     m_bQuestListMode = false;
+
     SetContents(0);
     ::PlayBuffer(SOUND_INTERFACE01);
 }
@@ -410,6 +411,15 @@ void CNewUINPCDialogue::SetCurNPCWords(int nQuestListCount)
         pszSrc = 0 < nQuestListCount ? g_QuestMng.GetWords(1501) : g_QuestMng.GetWords(1502);
     else
         pszSrc = g_QuestMng.GetNPCDlgNPCWords(m_dwCurDlgIndex);
+
+    if (pszSrc == NULL)
+    {
+        m_nMaxNPCPage = 0;
+        m_nSelNPCPage = 0;
+        m_eLowerView = SEL_TEXTS_MODE;
+        m_btnProgressR.Lock();
+        return;
+    }
 
     int nLine = ::DivideStringByPixel(&m_aszNPCWords[0][0], ND_NPC_LINE_MAX, ND_WORDS_ROW_MAX,
         pszSrc, 160);
@@ -498,10 +508,17 @@ void CNewUINPCDialogue::SetQuestListText(DWORD* adwSrcQuestIndex, int nIndexCoun
 {
     _ASSERT(0 <= nIndexCount && nIndexCount <= ND_QUEST_INDEX_MAX_COUNT);
 
-    ::memset(m_adwQuestIndex, 0, sizeof(DWORD) * ND_QUEST_INDEX_MAX_COUNT);
-    ::memcpy(m_adwQuestIndex, adwSrcQuestIndex, sizeof(DWORD) * nIndexCount);
+    const int safeQuestCount = (nIndexCount < 0)
+        ? 0
+        : ((nIndexCount > ND_QUEST_INDEX_MAX_COUNT) ? ND_QUEST_INDEX_MAX_COUNT : nIndexCount);
 
-    m_nSelTextCount = nIndexCount + 1;
+    ::memset(m_adwQuestIndex, 0, sizeof(DWORD) * ND_QUEST_INDEX_MAX_COUNT);
+    if (adwSrcQuestIndex != nullptr && safeQuestCount > 0)
+    {
+        ::memcpy(m_adwQuestIndex, adwSrcQuestIndex, sizeof(DWORD) * safeQuestCount);
+    }
+
+    m_nSelTextCount = safeQuestCount + 1;
 
     ::memset(m_aszSelTexts[0], 0, sizeof(wchar_t) * ND_SEL_TEXT_LINE_MAX * ND_WORDS_ROW_MAX);
     ::memset(m_anSelTextLine, 0, sizeof(int) * (ND_QUEST_INDEX_MAX_COUNT + 1));
@@ -560,10 +577,26 @@ void CNewUINPCDialogue::ProcessSelTextResult()
             auto questNumber = static_cast<uint16_t>(m_adwQuestIndex[m_nSelSelText - 1] & 0xFFFFu);
             auto questGroup = static_cast<uint16_t>((m_adwQuestIndex[m_nSelSelText - 1] & 0xFFFF0000u) >> 16);
             SocketClient->ToGameServer()->SendQuestSelectRequest(questNumber, questGroup, (BYTE)m_nSelSelText);
+            g_pNewUISystem->Hide(SEASON3B::INTERFACE_NPC_DIALOGUE);
         }
     }
     else
     {
+        if (g_QuestMng.GetNPCIndex() == 257 && m_dwCurDlgIndex == 0)
+        {
+            if (m_nSelSelText == 1)
+            {
+                SocketClient->ToGameServer()->SendNpcBuffRequest();
+                g_pNewUISystem->Hide(SEASON3B::INTERFACE_NPC_DIALOGUE);
+            }
+            else if (m_nSelSelText == 2)
+            {
+                SocketClient->ToGameServer()->SendAvailableQuestsRequest();
+            }
+
+            return;
+        }
+
         int nAnswerResult = g_QuestMng.GetNPCDlgAnswerResult(m_dwCurDlgIndex, m_nSelSelText - 1);
         if (900 >= nAnswerResult)
         {

@@ -11176,6 +11176,71 @@ void RenderCharacter(CHARACTER* c, OBJECT* o, int Select)
     }
     }
 
+    // Summons use monster models, so they do not pass through the MODEL_PLAYER buff visual branch.
+    // Keep the same aura joint behavior for attack/defense buffs here.
+    if (o->Kind == KIND_PLAYER && o->Type != MODEL_PLAYER)
+    {
+        const bool hasAttackBuff = g_isCharacterBuff(o, eBuff_Attack)
+            || g_isCharacterBuff(o, eBuff_HelpNpc)
+            || g_isCharacterBuff(o, eBuff_Att_up_Ourforces);
+        const bool hasDefenseBuff = g_isCharacterBuff(o, eBuff_Defense);
+        const bool isCloaked = g_isCharacterBuff(o, eBuff_Cloaking);
+
+        if (hasAttackBuff && !isCloaked)
+        {
+            if (!SearchEffect(BITMAP_LIGHT_RED, o, 1))
+            {
+                vec3_t attackLight;
+                Vector(0.8f, 0.30f, 0.15f, attackLight);
+                CreateEffect(BITMAP_LIGHT_RED, o->Position, o->Angle, attackLight, 1, o, -1, 0, 0, 0, 0.75f);
+            }
+
+            if (rand_fps_check(3))
+            {
+                vec3_t sparkLight;
+                Vector(0.9f, 0.45f, 0.1f, sparkLight);
+                CreateParticle(BITMAP_SHINY + 1, o->Position, o->Angle, sparkLight, 0, 1.0f, o);
+                CreateSprite(BITMAP_LIGHT, o->Position, 0.45f, sparkLight, o);
+            }
+
+            if (!SearchJoint(BITMAP_FLARE, o, 44))
+            {
+                vec3_t flareLight;
+                Vector(0.9f, 0.40f, 0.12f, flareLight);
+                CreateJoint(BITMAP_FLARE, o->Position, o->Position, o->Angle, 44, o, 20.0f, 0, 0, 0, 0, flareLight);
+            }
+
+            if (!SearchJoint(MODEL_SPEARSKILL, o, 4) && !SearchJoint(MODEL_SPEARSKILL, o, 9))
+            {
+                for (int i = 0; i < 5; ++i)
+                {
+                    CreateJoint(MODEL_SPEARSKILL, o->Position, o->Position, o->Angle, 4, o, 20.0f, -1, 0, 0, c->TargetCharacter);
+                }
+            }
+        }
+        else
+        {
+            DeleteEffect(BITMAP_LIGHT_RED, o, 1);
+            DeleteJoint(BITMAP_FLARE, o, 44);
+        }
+
+        if (hasDefenseBuff && !isCloaked)
+        {
+            if (!SearchJoint(MODEL_SPEARSKILL, o, 4) && !SearchJoint(MODEL_SPEARSKILL, o, 9))
+            {
+                for (int i = 0; i < 5; ++i)
+                {
+                    CreateJoint(MODEL_SPEARSKILL, o->Position, o->Position, o->Angle, 4, o, 20.0f, -1, 0, 0, c->TargetCharacter);
+                }
+            }
+        }
+        else if (!hasAttackBuff || isCloaked)
+        {
+            DeleteJoint(MODEL_SPEARSKILL, o, 4);
+            DeleteJoint(MODEL_SPEARSKILL, o, 9);
+        }
+    }
+
     if (SceneFlag == MAIN_SCENE)
     {
         if ((o->Kind == KIND_PLAYER

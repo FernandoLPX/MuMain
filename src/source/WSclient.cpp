@@ -1617,6 +1617,7 @@ void ReceiveNotice(const BYTE* ReceiveBuffer)
         if (CHARACTER_SCENE != SceneFlag)
         {
             g_pSystemLogBox->AddText(Text, SEASON3B::TYPE_SYSTEM_MESSAGE);
+            g_pChatListBox->AddText(L"", Text, SEASON3B::TYPE_SYSTEM_MESSAGE);
             EnableUse = 0;
         }
         else
@@ -9711,11 +9712,67 @@ void ReceiveQuestHistory(const BYTE* ReceiveBuffer)
     g_csQuest.setQuestLists(Data->m_byQuest, Data->m_byCount, Hero->Class);
 }
 
+namespace
+{
+    BYTE DecodeLegacyQuestState(BYTE packedState, int slotIndex)
+    {
+        const int shift = slotIndex * 2;
+        return static_cast<BYTE>((packedState >> shift) & 0x03);
+    }
+
+    void ApplyLegacyQuestStateBlock(BYTE questIndex, BYTE packedState)
+    {
+        // Decode all 4 states from the packed byte to find the active quest.
+        // setQuestList() does m_byCurrQuestIndexWnd = max(old, index), so calling
+        // it for indices 0..3 leaves the window stuck at index 3.
+        // We therefore call it only once with the correct active quest index.
+        const int blockStart = (questIndex / 4) * 4;
+        BYTE decodedStates[4] = { 0, 0, 0, 0 };
+        int preferredQuestIndex = -1;
+
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            const int absoluteQuestIndex = blockStart + slot;
+            if (absoluteQuestIndex >= MAX_QUESTS)
+                break;
+
+            decodedStates[slot] = DecodeLegacyQuestState(packedState, slot);
+
+            if (preferredQuestIndex == -1 && decodedStates[slot] == QUEST_ING)
+                preferredQuestIndex = absoluteQuestIndex;
+        }
+
+        if (preferredQuestIndex == -1)
+        {
+            for (int slot = 0; slot < 4; ++slot)
+            {
+                const int absoluteQuestIndex = blockStart + slot;
+                if (absoluteQuestIndex >= MAX_QUESTS)
+                    break;
+                if (decodedStates[slot] != QUEST_END)
+                {
+                    preferredQuestIndex = absoluteQuestIndex;
+                    break;
+                }
+            }
+        }
+
+        if (preferredQuestIndex == -1)
+            preferredQuestIndex = blockStart;
+
+        if (preferredQuestIndex >= 0 && preferredQuestIndex < MAX_QUESTS)
+        {
+            const int preferredSlot = preferredQuestIndex - blockStart;
+            g_csQuest.setQuestList(preferredQuestIndex, decodedStates[preferredSlot]);
+        }
+    }
+}
+
 void ReceiveQuestState(const BYTE* ReceiveBuffer)
 {
     auto Data = (LPPRECEIVE_QUEST_STATE)ReceiveBuffer;
 
-    g_csQuest.setQuestList(Data->m_byQuestIndex, Data->m_byState);
+    ApplyLegacyQuestStateBlock(Data->m_byQuestIndex, Data->m_byState);
     g_pNewUISystem->HideAll();
     g_pNewUISystem->Show(SEASON3B::INTERFACE_NPCQUEST);
 }
@@ -9726,7 +9783,7 @@ void ReceiveQuestResult(const BYTE* ReceiveBuffer)
 
     if (Data->m_byResult == 0)
     {
-        g_csQuest.setQuestList(Data->m_byQuestIndex, Data->m_byState);
+        ApplyLegacyQuestStateBlock(Data->m_byQuestIndex, Data->m_byState);
         g_pNewUISystem->HideAll();
         g_pNewUISystem->Show(SEASON3B::INTERFACE_NPCQUEST);
     }
@@ -9921,8 +9978,28 @@ void ReceiveQuestByNPCEPList(const BYTE* ReceiveBuffer)
 {
     auto pData = (LPPMSG_NPCTALK_QUESTLIST)ReceiveBuffer;
     if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPC_DIALOGUE))
+    {
+        int safeCount = static_cast<int>(pData->m_wQuestCount);
+        const int payloadBytes = static_cast<int>(pData->Header.Size) - static_cast<int>(sizeof(PMSG_NPCTALK_QUESTLIST));
+        const int maxCountFromPacket = (payloadBytes > 0) ? (payloadBytes / static_cast<int>(sizeof(DWORD))) : 0;
+        if (safeCount > maxCountFromPacket)
+        {
+            safeCount = maxCountFromPacket;
+        }
+
+        if (safeCount < 0)
+        {
+            safeCount = 0;
+        }
+
+        if (safeCount > ND_QUEST_INDEX_MAX_COUNT)
+        {
+            safeCount = ND_QUEST_INDEX_MAX_COUNT;
+        }
+
         g_pNPCDialogue->ProcessQuestListReceive(
-            (DWORD*)(ReceiveBuffer + sizeof(PMSG_NPCTALK_QUESTLIST)), pData->m_wQuestCount);
+            (DWORD*)(ReceiveBuffer + sizeof(PMSG_NPCTALK_QUESTLIST)), safeCount);
+    }
 }
 
 void ReceiveQuestQSSelSentence(const BYTE* ReceiveBuffer)
@@ -9934,10 +10011,27 @@ void ReceiveQuestQSSelSentence(const BYTE* ReceiveBuffer)
 
 void ReceiveQuestQSRequestReward(const BYTE* ReceiveBuffer)
 {
-    auto pData = (LPPMSG_NPC_QUESTEXP_INFO)ReceiveBuffer;
+    constexpr int QuestExpHeaderSize = 11;
+    constexpr int QuestRequestEntrySize = 26;
+    constexpr int QuestRewardEntrySize = 22;
+    constexpr int QuestEntryCount = 5;
+
+    const int packetSize = (ReceiveBuffer[0] == 0xC2 || ReceiveBuffer[0] == 0xC4)
+        ? (static_cast<int>(ReceiveBuffer[1]) << 8) | static_cast<int>(ReceiveBuffer[2])
+        : static_cast<int>(ReceiveBuffer[1]);
+    const int expectedSize = QuestExpHeaderSize + (QuestRequestEntrySize * QuestEntryCount) + (QuestRewardEntrySize * QuestEntryCount);
+    if (packetSize < expectedSize)
+    {
+        return;
+    }
+
+    const DWORD questIndex = static_cast<DWORD>(ReceiveBuffer[7])
+        | (static_cast<DWORD>(ReceiveBuffer[8]) << 8)
+        | (static_cast<DWORD>(ReceiveBuffer[9]) << 16)
+        | (static_cast<DWORD>(ReceiveBuffer[10]) << 24);
     g_QuestMng.SetQuestRequestReward(ReceiveBuffer);
-    g_QuestMng.SetCurQuestProgress(pData->m_dwQuestIndex);
-    g_QuestMng.SetEPRequestRewardState(pData->m_dwQuestIndex, true);
+    g_QuestMng.SetCurQuestProgress(questIndex);
+    g_QuestMng.SetEPRequestRewardState(questIndex, true);
 }
 
 void ReceiveQuestCompleteResult(const BYTE* ReceiveBuffer)
@@ -9992,7 +10086,20 @@ void ReceiveProgressQuestList(const BYTE* ReceiveBuffer)
 
 void ReceiveProgressQuestRequestReward(const BYTE* ReceiveBuffer)
 {
-    auto pData = (LPPMSG_NPC_QUESTEXP_INFO)ReceiveBuffer;
+    constexpr int QuestExpHeaderSize = 11;
+    constexpr int QuestRequestEntrySize = 26;
+    constexpr int QuestRewardEntrySize = 22;
+    constexpr int QuestEntryCount = 5;
+
+    const int packetSize = (ReceiveBuffer[0] == 0xC2 || ReceiveBuffer[0] == 0xC4)
+        ? (static_cast<int>(ReceiveBuffer[1]) << 8) | static_cast<int>(ReceiveBuffer[2])
+        : static_cast<int>(ReceiveBuffer[1]);
+    const int expectedSize = QuestExpHeaderSize + (QuestRequestEntrySize * QuestEntryCount) + (QuestRewardEntrySize * QuestEntryCount);
+    if (packetSize < expectedSize)
+    {
+        return;
+    }
+
     g_QuestMng.SetQuestRequestReward(ReceiveBuffer);
     g_pMyQuestInfoWindow->SetSelQuestRequestReward();
 }
@@ -14745,6 +14852,20 @@ void InsertBuffPhysicalEffect(eBuffState buff, OBJECT* o)
         }
     }
     break;
+    case eBuff_Attack:
+    {
+        vec3_t attackLight;
+        vec3_t flareLight;
+        Vector(1.0f, 0.35f, 0.2f, attackLight);
+        Vector(1.0f, 0.45f, 0.15f, flareLight);
+        DeleteEffect(BITMAP_LIGHT_RED, o, 1);
+        const float attackScale = (o->Kind == KIND_PLAYER && o->Type != MODEL_PLAYER) ? 0.75f : 1.2f;
+        CreateEffect(BITMAP_LIGHT_RED, o->Position, o->Angle, attackLight, 1, o, -1, 0, 0, 0, attackScale);
+        DeleteJoint(BITMAP_FLARE, o, 44);
+        const float flareScale = (o->Kind == KIND_PLAYER && o->Type != MODEL_PLAYER) ? 20.0f : 30.0f;
+        CreateJoint(BITMAP_FLARE, o->Position, o->Position, o->Angle, 44, o, flareScale, 0, 0, 0, 0, flareLight);
+    }
+    break;
     case eBuff_AddAG:
     {
         DeleteEffect(BITMAP_LIGHT, o, 2);
@@ -14948,6 +15069,13 @@ void ClearBuffPhysicalEffect(eBuffState buff, OBJECT* o)
     {
         DeleteJoint(MODEL_SPEARSKILL, o, 4);
         DeleteJoint(MODEL_SPEARSKILL, o, 9);
+    }
+    break;
+
+    case eBuff_Attack:
+    {
+        DeleteEffect(BITMAP_LIGHT_RED, o, 1);
+        DeleteJoint(BITMAP_FLARE, o, 44);
     }
     break;
 

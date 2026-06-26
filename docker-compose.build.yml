@@ -1,0 +1,18 @@
+services:
+  mumain-build:
+    build:
+      context: .
+      dockerfile: docker/mingw-builder.Dockerfile
+    working_dir: /work
+    volumes:
+      - ./:/work
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    command: >-
+      bash -lc '
+      git submodule update --init &&
+      cmake -S . -B build-mingw -G Ninja
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw-w64-i686.cmake
+      -DCMAKE_BUILD_TYPE=Release
+      -DENABLE_EDITOR=OFF
+      -DMU_TURBOJPEG_STATIC_LIB=/opt/mingw-turbo/lib/libturbojpeg.a &&
+      cmake --build build-mingw -j"$(nproc)"'
