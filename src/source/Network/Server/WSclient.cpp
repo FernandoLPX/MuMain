@@ -10463,8 +10463,12 @@ void ReceiveProgressQuestRequestReward(const BYTE* ReceiveBuffer)
         return;
     }
 
+    const DWORD questIndex = static_cast<DWORD>(ReceiveBuffer[7])
+        | (static_cast<DWORD>(ReceiveBuffer[8]) << 8)
+        | (static_cast<DWORD>(ReceiveBuffer[9]) << 16)
+        | (static_cast<DWORD>(ReceiveBuffer[10]) << 24);
     g_QuestMng.SetQuestRequestReward(ReceiveBuffer);
-    g_QuestMng.SetEPRequestRewardState(pData->m_dwQuestIndex, true);
+    g_QuestMng.SetEPRequestRewardState(questIndex, true);
     g_pMyQuestInfoWindow->SetSelQuestRequestReward();
 }
 

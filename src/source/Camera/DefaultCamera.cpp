@@ -493,6 +493,10 @@ namespace
     // Snap threshold — when the offset is close enough, snap to target
     // to avoid endless micro-oscillation.
     constexpr float MOUNT_LERP_SNAP_THRESHOLD   = 0.5f;
+
+    // Offset vertical para centralizar a camera no corpo do personagem ao inves dos pes.
+    // Ajuste este valor (80-120) conforme preferencia visual.
+    constexpr float CAMERA_BODY_OFFSET = 80.f;
 }
 
 float DefaultCamera::GetTargetMountOffset() const
@@ -612,7 +616,18 @@ void DefaultCamera::CalculateCameraPosition()
         // Other scenes (login / character) keep g_shCameraLevel at 0 so
         // ZzzLodTerrain's CharacterScene Width formula and similar
         // level-keyed paths still hit their case-0 branch.
-        g_shCameraLevel = static_cast<short>(m_PlayerZoomLevel);
+        //
+        // Se Ctrl estiver pressionado, o SetViewPortLevel (Ctrl+Scroll)
+        // ajustou g_shCameraLevel diretamente — então sincronizamos
+        // m_PlayerZoomLevel com o valor atual em vez de sobrescrever.
+        if (Core::Input::IsKeyDown(VK_CONTROL) || Core::Input::IsKeyDown(VK_LCONTROL) || Core::Input::IsKeyDown(VK_RCONTROL))
+        {
+            m_PlayerZoomLevel = g_shCameraLevel;
+        }
+        else
+        {
+            g_shCameraLevel = static_cast<short>(m_PlayerZoomLevel);
+        }
     }
     else
     {
@@ -629,7 +644,7 @@ void DefaultCamera::CalculateCameraPosition()
 
     if (!CCameraMove::GetInstancePtr()->IsTourMode())
     {
-        m_State.Position[2] = Hero->Object.Position[2];
+        m_State.Position[2] = Hero->Object.Position[2] + CAMERA_BODY_OFFSET;
     }
 
     if ((TerrainWall[iIndex] & TW_HEIGHT) == TW_HEIGHT)

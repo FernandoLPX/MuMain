@@ -2,6 +2,7 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG LIBJPEG_TURBO_VERSION=2.1.5.1
+ARG DOTNET_SDK_VERSION=10.0
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -16,7 +17,14 @@ RUN apt-get update && apt-get install -y \
     make \
     nasm \
     pkg-config \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install .NET SDK for NuGet package restore (wire-size codegen)
+# See: https://learn.microsoft.com/dotnet/core/install/linux-ubuntu
+RUN curl -fsSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh \
+    | bash -s -- --channel ${DOTNET_SDK_VERSION} --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
 
 WORKDIR /opt
 

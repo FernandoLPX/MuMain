@@ -7,24 +7,26 @@
 #include <GL/glu.h>
 #include <math.h>
 #include <iterator>
-#include "ZzzOpenglUtil.h"
-#include "ZzzBMD.h"
+#include "Render/Textures/ZzzOpenglUtil.h"
+#include "Render/Models/ZzzBMD.h"
 #include "ZzzLodTerrain.h"
-#include "ZzzPath.h"
-#include "ZzzTexture.h"
-#include "ZzzInfomation.h"
-#include "ZzzObject.h"
-#include "ZzzCharacter.h"
-#include "ZzzInterface.h"
-#include "ZzzEffect.h"
+#include "Engine/Pathing/ZzzPath.h"
+#include "Render/Textures/ZzzTexture.h"
+#include "Engine/Object/ZzzInfomation.h"
+#include "Engine/Object/ZzzObject.h"
+#include "Engine/Object/ZzzCharacter.h"
+#include "Engine/Object/ZzzInterface.h"
+#include "Render/Effects/ZzzEffect.h"
 
-#include "CSChaosCastle.h"
-#include "CMVP1stDirection.h"
-#include "CDirection.h"
-#include "MapManager.h"
+#include "GameLogic/Events/CSChaosCastle.h"
+#include "GameLogic/Events/Cinematic/CMVP1stDirection.h"
+#include "GameLogic/Events/Cinematic/CDirection.h"
+#include "World/MapInfra/MapManager.h"
 
-#include "w_MapHeaders.h"
-#include "CameraMove.h"
+#include "World/MapInfra/w_MapHeaders.h"
+#include "Camera/CameraMove.h"
+#include "Camera/CameraProjection.h"
+#include "I18N/All.h"
 
 //-------------------------------------------------------------------------------------------------------------
 
@@ -66,8 +68,17 @@ const float g_fMinHeight = -500.f;
 const float g_fMaxHeight = 1000.f;
 
 extern  short   g_shCameraLevel;
-extern  float CameraDistanceTarget;
-extern  float CameraDistance;
+
+namespace
+{
+    struct GlobalTextCompat
+    {
+        const wchar_t* operator[](int index) const
+        {
+            return I18N::Game::Lookup(index);
+        }
+    } GlobalText;
+}
 
 static  float   g_fFrustumRange = -40.f;
 
@@ -2042,7 +2053,7 @@ void CreateFrustrum2D(vec3_t Position)
     {
         static  int CameraLevel;
 
-        if ((int)CameraDistanceTarget >= (int)CameraDistance)
+        if ((int)g_Camera.DistanceTarget >= (int)g_Camera.Distance)
         {
             CameraLevel = g_shCameraLevel;
             if (CameraLevel < 0) CameraLevel = 0;
@@ -2096,8 +2107,8 @@ void CreateFrustrum2D(vec3_t Position)
             {
                 CameraViewNear = CameraViewFar * 0.19f;//0.22
                 CameraViewTarget = CameraViewFar * 0.47f;//0.47
-                WidthFar = 1190.f * Width * sqrtf(CameraFOV / 33.f); // 1140.f
-                WidthNear = 540.f * Width * sqrtf(CameraFOV / 33.f); // 540.f
+                WidthFar = 1190.f * Width * sqrtf(g_Camera.FOV / 33.f); // 1140.f
+                WidthNear = 540.f * Width * sqrtf(g_Camera.FOV / 33.f); // 540.f
             }
             break;
         case 1:
@@ -2153,14 +2164,14 @@ void CreateFrustrum2D(vec3_t Position)
 
     if (gMapManager.WorldActive == WD_73NEW_LOGIN_SCENE)
     {
-        VectorScale(CameraAngle, -1.0f, Angle);
+        VectorScale(g_Camera.Angle, -1.0f, Angle);
         CCameraMove::GetInstancePtr()->SetFrustumAngle(89.5f);
         vec3_t _Temp = { CCameraMove::GetInstancePtr()->GetFrustumAngle(), 0.0f, 0.0f };
         VectorAdd(Angle, _Temp, Angle);
     }
     else
     {
-        Vector(0.f, 0.f, -CameraAngle[2], Angle);
+        Vector(0.f, 0.f, -g_Camera.Angle[2], Angle);
     }
 
     AngleMatrix(Angle, Matrix);
@@ -2194,8 +2205,8 @@ bool TestFrustrum2D(float x, float y, float Range)
 
 void CreateFrustrum(float xAspect, float yAspect, vec3_t position)
 {
-    const auto fovv = tanf(CameraFOV * Q_PI / 360.f);
-    float Distance = CameraViewFar;
+    const auto fovv = tanf(g_Camera.FOV * Q_PI / 360.f);
+    float Distance = g_Camera.ViewFar;
     float Width = fovv * Distance * xAspect + 100.f;
     float Height = fovv * Distance * yAspect + 100.f;
 
@@ -2211,12 +2222,12 @@ void CreateFrustrum(float xAspect, float yAspect, vec3_t position)
     float FrustrumMaxX = 0.f;
     float FrustrumMaxY = 0.f;
     float Matrix[3][4];
-    GetOpenGLMatrix(Matrix);
+    CameraProjection::GetOpenGLMatrix(Matrix);
     for (int i = 0; i < 5; i++)
     {
         vec3_t t;
         VectorIRotate(Temp[i], Matrix, t);
-        VectorAdd(t, CameraPosition, FrustrumVertex[i]);
+        VectorAdd(t, g_Camera.Position, FrustrumVertex[i]);
         if (FrustrumMinX > FrustrumVertex[i][0]) FrustrumMinX = FrustrumVertex[i][0];
         if (FrustrumMinY > FrustrumVertex[i][1]) FrustrumMinY = FrustrumVertex[i][1];
         if (FrustrumMaxX < FrustrumVertex[i][0]) FrustrumMaxX = FrustrumVertex[i][0];
@@ -2248,6 +2259,21 @@ void CreateFrustrum(float xAspect, float yAspect, vec3_t position)
     CreateFrustrum2D(position);
 }
 
+void CacheActiveFrustum()
+{
+    // Compatibility shim used by CameraUtility/CameraManager migration.
+    // Keep 2D frustum cache in sync with the current global camera state.
+    CreateFrustrum2D(g_Camera.Position);
+}
+
+void ResetFrustrumBoundsFullTerrain()
+{
+    FrustrumBoundMinX = 0;
+    FrustrumBoundMinY = 0;
+    FrustrumBoundMaxX = TERRAIN_SIZE_MASK;
+    FrustrumBoundMaxY = TERRAIN_SIZE_MASK;
+}
+
 bool TestFrustrum(vec3_t Position, float Range)
 {
     for (int i = 0; i < 5; i++)
@@ -2274,7 +2300,7 @@ void CFrustrum::Make(vec3_t vEye, float fFov, float fAspect, float fDist)
     Vector(-Width, -Height, -fDist, Temp[4]);
 
     float Matrix[3][4];
-    GetOpenGLMatrix(Matrix);
+    CameraProjection::GetOpenGLMatrix(Matrix);
     for (int i = 0; i < 5; i++)
     {
         vec3_t t;
@@ -2327,7 +2353,7 @@ void ResetAllFrustrum()
     {
         CFrustrum* pData = iter->second;
         if (!pData) continue;
-        pData->SetEye(CameraPosition);
+        pData->SetEye(g_Camera.Position);
         pData->Reset();
     }
 }
@@ -2527,7 +2553,7 @@ void RenderTerrainBlock(float xf, float yf, int xi, int yi, bool EditFlag)
         float temp = xf;
         for (int j = 0; j < 4; j += lodi)
         {
-            if (TestFrustrum2D(xf + 0.5f, yf + 0.5f, 0.f) || CameraTopViewEnable)
+            if (TestFrustrum2D(xf + 0.5f, yf + 0.5f, 0.f) || g_Camera.TopViewEnable)
             {
                 RenderTerrainTile(xf, yf, xi + j, yi + i, lodf, lodi, EditFlag);
             }
@@ -2551,12 +2577,12 @@ void RenderTerrainFrustrum(bool EditFlag)
         xf = (float)xi;
         for (; xi <= FrustrumBoundMaxX; xi += 4, xf += 4.f)
         {
-            if (TestFrustrum2D(xf + 2.f, yf + 2.f, g_fFrustumRange) || CameraTopViewEnable)
+            if (TestFrustrum2D(xf + 2.f, yf + 2.f, g_fFrustumRange) || g_Camera.TopViewEnable)
             {
                 if (gMapManager.WorldActive == WD_73NEW_LOGIN_SCENE)
                 {
-                    float fDistance_x = CameraPosition[0] - xf / 0.01f;
-                    float fDistance_y = CameraPosition[1] - yf / 0.01f;
+                    float fDistance_x = g_Camera.Position[0] - xf / 0.01f;
+                    float fDistance_y = g_Camera.Position[1] - yf / 0.01f;
                     float fDistance = sqrtf(fDistance_x * fDistance_x + fDistance_y * fDistance_y);
 
                     if (fDistance > 5200.f)
@@ -2577,7 +2603,7 @@ void RenderTerrainBlock_After(float xf, float yf, int xi, int yi, bool EditFlag)
         float temp = xf;
         for (int j = 0; j < 4; j += lodi)
         {
-            if (TestFrustrum2D(xf + 0.5f, yf + 0.5f, 0.f) || CameraTopViewEnable)
+            if (TestFrustrum2D(xf + 0.5f, yf + 0.5f, 0.f) || g_Camera.TopViewEnable)
             {
                 RenderTerrainTile_After(xf, yf, xi + j, yi + i, lodf, lodi, EditFlag);
             }
@@ -2600,7 +2626,7 @@ void RenderTerrainFrustrum_After(bool EditFlag)
         xf = (float)xi;
         for (; xi <= FrustrumBoundMaxX; xi += 4, xf += 4.f)
         {
-            if (TestFrustrum2D(xf + 2.f, yf + 2.f, -80.f) || CameraTopViewEnable)
+            if (TestFrustrum2D(xf + 2.f, yf + 2.f, -80.f) || g_Camera.TopViewEnable)
             {
                 RenderTerrainBlock_After(xf, yf, xi, yi, EditFlag);
             }
@@ -2688,14 +2714,14 @@ void RenderSun()
     float Matrix[3][4];
     Angle[0] = 0.f;
     Angle[1] = 0.f;
-    Angle[2] = CameraAngle[2];
+    Angle[2] = g_Camera.Angle[2];
     AngleIMatrix(Angle, Matrix);
     vec3_t p, Position;
-    Vector(-900.f, CameraViewFar * 0.9f, 0.f, p);
+    Vector(-900.f, g_Camera.ViewFar * 0.9f, 0.f, p);
     VectorRotate(p, Matrix, Position);
-    VectorAdd(CameraPosition, Position, Sun.Position);
+    VectorAdd(g_Camera.Position, Position, Sun.Position);
     Sun.Position[2] = 550.f;
-    Sun.Visible = TestDepthBuffer(Sun.Position);
+    Sun.Visible = CameraProjection::TestDepthBuffer(g_Camera, Sun.Position);
     BeginSprite();
     //RenderSprite(&Sun);
     EndSprite();
@@ -2708,7 +2734,7 @@ void RenderSky()
     float Matrix[3][4];
     Angle[0] = 0.f;
     Angle[1] = 0.f;
-    Angle[2] = CameraAngle[2];
+    Angle[2] = g_Camera.Angle[2];
     AngleIMatrix(Angle, Matrix);
     float Aspect = (float)(WindowWidth) / (float)(WindowWidth);
     float Width = 1780.f * Aspect;
@@ -2720,9 +2746,9 @@ void RenderSky()
 
     for (int i = 0; i <= Num; i++)
     {
-        Vector(((float)i - Num * 0.5f) * (Width / Num), CameraViewFar * 0.99f, 0.f, p);
+        Vector(((float)i - Num * 0.5f) * (Width / Num), g_Camera.ViewFar * 0.99f, 0.f, p);
         VectorRotate(p, Matrix, Position);
-        VectorAdd(CameraPosition, Position, Position);
+        VectorAdd(g_Camera.Position, Position, Position);
         RequestTerrainLight(Position[0], Position[1], LightTable[i]);
     }
 
@@ -2757,9 +2783,9 @@ void RenderSky()
         Vector(1.f, 1.f, 1.f, Light[2]);
         Vector(1.f, 1.f, 1.f, Light[3]);
 
-        Vector((x - Num * 0.5f + 0.5f) * (Width / Num), CameraViewFar * 0.9f, 0.f, p);
+        Vector((x - Num * 0.5f + 0.5f) * (Width / Num), g_Camera.ViewFar * 0.9f, 0.f, p);
         VectorRotate(p, Matrix, Position);
-        VectorAdd(CameraPosition, Position, Position);
+        VectorAdd(g_Camera.Position, Position, Position);
         Position[2] = 400.f;
         //RenderSpriteUV(BITMAP_SKY,Position,Width/Num,Height,UV,Light);
     }

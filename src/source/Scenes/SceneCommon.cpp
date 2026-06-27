@@ -6,6 +6,8 @@
 #include "stdafx.h"
 #include "SceneCommon.h"
 #include "SceneCore.h"
+#include "Camera/CameraProjection.h"
+#include "I18N/All.h"
 
 //=============================================================================
 // Character Selection State Implementation
@@ -34,20 +36,30 @@ bool& EnableMainRender = g_sceneInit.GetEnableMainRender();
 //=============================================================================
 // Scene Common Utilities
 //=============================================================================
-#include "../ZzzInterface.h"
-#include "../ZzzInventory.h"
-#include "../ZzzTexture.h"
-#include "../ZzzOpenglUtil.h"
-#include "../ZzzObject.h"
-#include "../ZzzInfomation.h"
-#include "../ZzzOpenData.h"
-#include "../UIManager.h"
-#include "../DSPlaySound.h"
-#include "../Local.h"
-#include "../GlobalText.h"
-#include "../PersonalShopTitleImp.h"
-#include "../CComGem.h"
-#include "../UIMng.h"
+#include "Engine/Object/ZzzInterface.h"
+#include "Engine/Object/ZzzInventory.h"
+#include "Render/Textures/ZzzTexture.h"
+#include "Render/Textures/ZzzOpenglUtil.h"
+#include "Engine/Object/ZzzObject.h"
+#include "Engine/Object/ZzzInfomation.h"
+#include "Engine/Object/ZzzOpenData.h"
+#include "UI/Legacy/UIManager.h"
+#include "Audio/DSPlaySound.h"
+#include "App/Platform/Windows/Local.h"
+#include "GameLogic/Items/PersonalShopTitleImp.h"
+#include "GameLogic/Items/CComGem.h"
+#include "UI/Legacy/UIMng.h"
+
+namespace
+{
+    struct GlobalTextCompat
+    {
+        const wchar_t* operator[](int index) const
+        {
+            return I18N::Game::Lookup(index);
+        }
+    } GlobalText;
+}
 
 // External variable declarations (defined in ZzzScene.cpp or other files)
 extern wchar_t AbuseFilter[][20];
@@ -171,47 +183,6 @@ BOOL CheckOptionMouseClick(int iOptionPos_y, BOOL bPlayClickSound)
     return FALSE;
 }
 
-int SeparateTextIntoLines(const wchar_t* lpszText, wchar_t* lpszSeparated, int iMaxLine, int iLineSize)
-{
-    int iLine = 0;
-    const wchar_t* lpLineStart = lpszText;
-    wchar_t* lpDst = lpszSeparated;
-    const wchar_t* lpSpace = NULL;
-    int iMbclen = 0;
-    for (const wchar_t* lpSeek = lpszText; *lpSeek; lpSeek += iMbclen, lpDst += iMbclen)
-    {
-        // For wide characters, always 1 character per unit
-        iMbclen = 1;
-        if (iMbclen + (lpSeek - lpLineStart) >= iLineSize)
-        {
-            if (lpSpace && (lpSeek - lpSpace) < std::min<int>(10, iLineSize / 2))
-            {
-                lpDst -= lpSeek - lpSpace - 1;
-                lpSeek = lpSpace + 1;
-            }
-
-            lpLineStart = lpSeek;
-            *lpDst = L'\0';
-            if (iLine >= iMaxLine - 1)
-            {
-                break;
-            }
-            ++iLine;
-            lpDst = lpszSeparated + iLine * iLineSize;
-            lpSpace = NULL;
-        }
-
-        memcpy(lpDst, lpSeek, iMbclen);
-        if (*lpSeek == L' ')
-        {
-            lpSpace = lpSeek;
-        }
-    }
-    *lpDst = L'\0';
-
-    return (iLine + 1);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Audio and Viewport Functions
 ///////////////////////////////////////////////////////////////////////////////
@@ -282,11 +253,12 @@ void RenderInfomation3D()
         glPushMatrix();
         glLoadIdentity();
         glViewport2(0, 0, WindowWidth, WindowHeight);
-        gluPerspective2(1.f, (float)(WindowWidth) / (float)(WindowHeight), CameraViewNear, CameraViewFar);
+        gluPerspective2(1.f, (float)(WindowWidth) / (float)(WindowHeight), g_Camera.ViewNear, g_Camera.ViewFar);
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
         glLoadIdentity();
-        GetOpenGLMatrix(CameraMatrix);
+        float cameraMatrix[3][4];
+        CameraProjection::GetOpenGLMatrix(cameraMatrix);
         EnableDepthTest();
         EnableDepthMask();
 
@@ -329,8 +301,6 @@ void RenderInfomation3D()
 
 void RenderInfomation()
 {
-    RenderNotices();
-
     CUIMng::Instance().Render();
 
     if (SceneFlag == LOG_IN_SCENE || SceneFlag == CHARACTER_SCENE)
