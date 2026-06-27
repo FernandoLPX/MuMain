@@ -124,6 +124,3 @@ BOOL ShowCheckBox(int num, int index, int message);
 bool GetTimeCheck(int DelayTime);
 bool IsEnterPressed();
 void SetEnterPressed(bool enterpressed);
-
-// Camera zoom: Ctrl + Mouse Wheel
-void SetViewPortLevel(int Wheel);

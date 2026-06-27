@@ -205,24 +205,6 @@ void SetEffectVolumeLevel(int level)
     }
 }
 
-void SetViewPortLevel(int Wheel)
-{
-    if ((HIBYTE(GetAsyncKeyState(VK_CONTROL)) == 128))
-    {
-        if (Wheel > 0)
-            g_shCameraLevel--;
-        else if (Wheel < 0)
-            g_shCameraLevel++;
-
-        MouseWheel = 0;
-
-        if (g_shCameraLevel > 4)
-            g_shCameraLevel = 4;
-        if (g_shCameraLevel < -4)
-            g_shCameraLevel = -4;
-    }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Rendering Functions
 ///////////////////////////////////////////////////////////////////////////////

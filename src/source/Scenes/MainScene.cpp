@@ -248,16 +248,6 @@ static void UpdateUIAndInput()
 
     if (ErrorMessage != MESSAGE_LOG_OUT)
         g_pUIManager->UpdateInput();
-
-    // Camera zoom: segure Ctrl e role a roda do mouse para aproximar/afastar
-    SetViewPortLevel(MouseWheel);
-
-    // Reset do zoom para o nivel padrao (0) com Ctrl + clique da roda do mouse
-    if (MouseMButtonPush && (HIBYTE(GetAsyncKeyState(VK_CONTROL)) == 128))
-    {
-        g_shCameraLevel = 0;
-        MouseMButtonPush = false;
-    }
 }
 
 /**
