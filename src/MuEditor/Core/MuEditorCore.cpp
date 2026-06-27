@@ -4,17 +4,46 @@
 
 #include "MuEditorCore.h"
 #include "imgui.h"
-#include "imgui_impl_win32.h"
+#include "imgui_impl_sdl3.h"
 #include "imgui_impl_opengl2.h"
 #include "MuInputBlockerCore.h"
 #include "../Config/MuEditorConfig.h"
 #include "../MuEditor/UI/Common/MuEditorCenterPaneUI.h"
 #include "../MuEditor/UI/ItemEditor/MuItemEditorUI.h"
 #include "../MuEditor/UI/SkillEditor/MuSkillEditorUI.h"
+#include "../MuEditor/UI/DevEditor/DevEditorUI.h"
 #include "../UI/Common/MuEditorUI.h"
 #include "../UI/Console/MuEditorConsoleUI.h"
-#include "Translation/i18n.h"
-#include "Utilities/StringUtils.h"
+#include "I18N/All.h"
+#include "Core/Utilities/StringUtils.h"
+
+#ifndef _WIN32
+#include <cstdio>    // popen / pclose
+#include <unistd.h>  // access
+#include <string>
+#include <vector>
+namespace
+{
+    // Resolve a font file via fontconfig (distro-agnostic), e.g.
+    // EditorFcMatch("sans-serif"). Empty if fc-match is unavailable.
+    std::string EditorFcMatch(const char* pattern)
+    {
+        const std::string cmd = std::string("fc-match -f '%{file}' '") + pattern + "' 2>/dev/null";
+        FILE* p = popen(cmd.c_str(), "r");
+        if (!p) return {};
+        std::string out;
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), p)) > 0)
+            out.append(buf, n);
+        pclose(p);
+        while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' '))
+            out.pop_back();
+        return out;
+    }
+    bool FontFileExists(const char* path) { return path && path[0] && ::access(path, R_OK) == 0; }
+}
+#endif
 
 // Windows cursor display counter thresholds
 // The cursor is visible when the counter is >= CURSOR_VISIBLE_THRESHOLD
@@ -33,6 +62,8 @@ CMuEditorCore::CMuEditorCore()
     , m_bFrameStarted(false)
     , m_bShowItemEditor(false)
     , m_bShowSkillEditor(false)
+    , m_bShowDevEditor(false)
+    , m_bShowConsole(true)
     , m_bHoveringUI(false)
     , m_bPreviousFrameHoveringUI(false)
 {
@@ -49,10 +80,17 @@ CMuEditorCore& CMuEditorCore::GetInstance()
     return instance;
 }
 
-void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
+void CMuEditorCore::Initialize(SDL_Window* window, void* glContext)
 {
     if (m_bInitialized)
         return;
+
+    if (window == nullptr || glContext == nullptr)
+    {
+        fwprintf(stderr, L"[MuEditor] Initialize failed: window or glContext is null\n");
+        fflush(stderr);
+        return;
+    }
 
     fwprintf(stderr, L"[MuEditor] Initialize() called\n");
     fflush(stderr);
@@ -76,11 +114,13 @@ void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
     fontConfig.PixelSnapH = true;
 
     // Build font atlas with multiple Unicode ranges
+    // CJK ranges are handled by a separate merged font below — primary font
+    // (e.g. Segoe UI) does not contain Han glyphs, so listing CJK here would
+    // just rasterize empty glyphs.
     ImFontGlyphRangesBuilder builder;
     builder.AddRanges(io.Fonts->GetGlyphRangesDefault());        // Basic Latin + Latin Supplement
     builder.AddRanges(io.Fonts->GetGlyphRangesCyrillic());       // Cyrillic (Russian, Ukrainian, etc.)
     builder.AddRanges(io.Fonts->GetGlyphRangesGreek());          // Greek
-    builder.AddRanges(io.Fonts->GetGlyphRangesJapanese());       // Includes common Asian characters
 
     // Add additional specific characters if needed
     static const ImWchar additionalRanges[] = {
@@ -91,19 +131,37 @@ void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
     };
     builder.AddRanges(additionalRanges);
 
-    ImVector<ImWchar> ranges;
+    // ImGui stores the ranges pointer in ImFontConfig and reads it lazily when
+    // the atlas is built (after Initialize returns), so the storage must outlive
+    // this function — keep it static.
+    static ImVector<ImWchar> ranges;
+    ranges.clear();
     builder.BuildRanges(&ranges);
+
+    // CJK ranges supplied by a merged system CJK font. Full covers Traditional
+    // Chinese (zh-TW translations) and is a superset of Japanese kana/kanji.
+    const ImWchar* cjkRanges = io.Fonts->GetGlyphRangesChineseFull();
 
     // Load default font with extended ranges
     // Try platform-specific fonts that support extended Unicode
     bool fontLoaded = false;
+
+    // Config for the merged CJK font: same atlas, glyphs fill into the primary
+    // ImFont so CJK codepoints render alongside Latin without manual font switching.
+    // Skip oversampling for CJK — ChineseFull rasterizes ~21k ideographs and 2x2
+    // oversampling can blow past the GPU's max texture size.
+    ImFontConfig cjkConfig = fontConfig;
+    cjkConfig.MergeMode = true;
+    cjkConfig.OversampleH = 1;
+    cjkConfig.OversampleV = 1;
 
 #ifdef _WIN32
     // Windows: Get fonts directory dynamically
     wchar_t windowsDir[MAX_PATH];
     if (GetWindowsDirectoryW(windowsDir, MAX_PATH) > 0)
     {
-        std::wstring fontPathW = std::wstring(windowsDir) + L"\\Fonts\\segoeui.ttf";
+        std::wstring fontDirW = std::wstring(windowsDir) + L"\\Fonts\\";
+        std::wstring fontPathW = fontDirW + L"segoeui.ttf";
 
         // Convert to UTF-8 using StringUtils helper
         std::string fontPath = StringUtils::WideToNarrow(fontPathW.c_str());
@@ -112,6 +170,27 @@ void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
             if (io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f, &fontConfig, ranges.Data) != nullptr)
             {
                 fontLoaded = true;
+            }
+        }
+
+        if (fontLoaded)
+        {
+            // Try Traditional Chinese first (matches zh-TW translations), then
+            // Simplified, then older fallbacks. First successful merge wins.
+            const wchar_t* cjkFonts[] = {
+                L"msjh.ttc",   // Microsoft JhengHei (Traditional)
+                L"msyh.ttc",   // Microsoft YaHei (Simplified)
+                L"mingliu.ttc",
+                L"simsun.ttc",
+            };
+            for (const wchar_t* name : cjkFonts)
+            {
+                std::string cjkPath = StringUtils::WideToNarrow((fontDirW + name).c_str());
+                if (!cjkPath.empty() &&
+                    io.Fonts->AddFontFromFileTTF(cjkPath.c_str(), 16.0f, &cjkConfig, cjkRanges) != nullptr)
+                {
+                    break;
+                }
             }
         }
     }
@@ -130,20 +209,59 @@ void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
             break;
         }
     }
-#else
-    // Linux: Try common fonts with Unicode support
-    const char* linuxFonts[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    };
-    for (const char* fontPath : linuxFonts)
+    if (fontLoaded)
     {
-        if (io.Fonts->AddFontFromFileTTF(fontPath, 16.0f, &fontConfig, ranges.Data) != nullptr)
+        const char* cjkFonts[] = {
+            "/System/Library/Fonts/PingFang.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        };
+        for (const char* path : cjkFonts)
+        {
+            if (io.Fonts->AddFontFromFileTTF(path, 16.0f, &cjkConfig, cjkRanges) != nullptr)
+            {
+                break;
+            }
+        }
+    }
+#else
+    // Linux/Unix: resolve a system font via fontconfig (distro-agnostic), with
+    // well-known paths as a fallback. Skip paths that don't exist so ImGui does
+    // not log "Could not load font file!" for each miss.
+    std::vector<std::string> linuxFonts;
+    if (std::string fc = EditorFcMatch("sans-serif"); !fc.empty())
+        linuxFonts.push_back(std::move(fc));
+    for (const char* p : {
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf" })
+        linuxFonts.emplace_back(p);
+    for (const std::string& fontPath : linuxFonts)
+    {
+        if (FontFileExists(fontPath.c_str()) &&
+            io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f, &fontConfig, ranges.Data) != nullptr)
         {
             fontLoaded = true;
             break;
+        }
+    }
+    if (fontLoaded)
+    {
+        // CJK is best-effort; keep the well-known paths (fc-match can return a
+        // non-CJK font when none is installed), but only try ones that exist.
+        const char* cjkFonts[] = {
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+        };
+        for (const char* path : cjkFonts)
+        {
+            if (FontFileExists(path) &&
+                io.Fonts->AddFontFromFileTTF(path, 16.0f, &cjkConfig, cjkRanges) != nullptr)
+            {
+                break;
+            }
         }
     }
 #endif
@@ -166,8 +284,21 @@ void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
     style.WindowRounding = 0.0f;
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
 
-    ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplOpenGL2_Init();
+    if (!ImGui_ImplSDL3_InitForOpenGL(window, glContext))
+    {
+        fwprintf(stderr, L"[MuEditor] ImGui_ImplSDL3_InitForOpenGL failed\n");
+        fflush(stderr);
+        ImGui::DestroyContext();
+        return;
+    }
+    if (!ImGui_ImplOpenGL2_Init())
+    {
+        fwprintf(stderr, L"[MuEditor] ImGui_ImplOpenGL2_Init failed\n");
+        fflush(stderr);
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
+        return;
+    }
 
     fwprintf(stderr, L"[MuEditor] ImGui backends initialized\n");
     fflush(stderr);
@@ -175,61 +306,12 @@ void CMuEditorCore::Initialize(HWND hwnd, HDC hdc)
     m_bInitialized = true;
     g_MuEditorConsoleUI.LogEditor("MU Editor initialized");
 
-    // Load configuration (includes language preference)
+    // Editor config holds editor-only preferences (column visibility etc.).
+    // The active UI locale lives in GameConfig.UILocale and was applied by
+    // Winmain before we got here; do not touch I18N::SetLocale from editor
+    // init or it'll overwrite the game-side selection.
     g_MuEditorConfig.Load();
-    std::string savedLanguage = g_MuEditorConfig.GetLanguage();
-
-    // Load translation files (editor only - game translations loaded by main game code)
-    i18n::Translator& translator = i18n::Translator::GetInstance();
-
-    // Helper lambda to try loading from multiple possible paths
-    auto TryLoadTranslation = [&translator, &savedLanguage](i18n::Domain domain, const wchar_t* relativePath) -> bool {
-        std::wstring lang(savedLanguage.begin(), savedLanguage.end());
-        std::wstring paths[] = {
-            std::wstring(L"Translations\\") + lang + L"\\" + relativePath,
-            std::wstring(L"bin\\Translations\\") + lang + L"\\" + relativePath
-        };
-
-        for (const auto& path : paths) {
-            if (translator.LoadTranslations(domain, path.c_str())) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    bool editorLoaded = TryLoadTranslation(i18n::Domain::Editor, L"editor.json");
-    bool metadataLoaded = TryLoadTranslation(i18n::Domain::Metadata, L"metadata.json");
-
-    // Set locale to saved language preference (or default "en")
-    if (!savedLanguage.empty() && translator.SwitchLanguage(savedLanguage))
-    {
-        g_MuEditorConsoleUI.LogEditor("Language restored to: " + savedLanguage);
-    }
-    else
-    {
-        translator.SetLocale("en");
-    }
-
-    if (editorLoaded && metadataLoaded)
-    {
-        g_MuEditorConsoleUI.LogEditor("Editor translations loaded successfully");
-    }
-    else
-    {
-        g_MuEditorConsoleUI.LogEditor("WARNING: Some editor translation files not loaded");
-        if (!editorLoaded) g_MuEditorConsoleUI.LogEditor("  - editor.json missing");
-        if (!metadataLoaded) g_MuEditorConsoleUI.LogEditor("  - metadata.json missing");
-
-        // Debug: Log current working directory
-        wchar_t cwd[MAX_PATH];
-        if (GetCurrentDirectoryW(MAX_PATH, cwd))
-        {
-            char cwdUtf8[MAX_PATH];
-            WideCharToMultiByte(CP_UTF8, 0, cwd, -1, cwdUtf8, MAX_PATH, NULL, NULL);
-            g_MuEditorConsoleUI.LogEditor(std::string("  Working directory: ") + cwdUtf8);
-        }
-    }
+    g_MuEditorConsoleUI.LogEditor(std::string("Active locale: ") + I18N::GetCurrentLocale());
 
     fwprintf(stderr, L"[MuEditor] Initialize() completed\n");
     fflush(stderr);
@@ -247,7 +329,7 @@ void CMuEditorCore::Shutdown()
     g_MuSkillEditorUI.SaveColumnPreferences();
 
     ImGui_ImplOpenGL2_Shutdown();
-    ImGui_ImplWin32_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
     m_bInitialized = false;
@@ -263,35 +345,11 @@ void CMuEditorCore::Update()
     {
         ImGui_ImplOpenGL2_NewFrame();
 
-        // Only let Win32 backend update mouse when editor is open
-        if (m_bEditorMode)
-        {
-            ImGui_ImplWin32_NewFrame();
-        }
-        else
-        {
-            // When closed, manually create a minimal frame and update mouse position
-            ImGuiIO& io = ImGui::GetIO();
-
-            // Get window size
-            extern HWND g_hWnd;
-            RECT rect;
-            GetClientRect(g_hWnd, &rect);
-            io.DisplaySize = ImVec2((float)(rect.right - rect.left), (float)(rect.bottom - rect.top));
-            io.DeltaTime = 1.0f / 60.0f;
-
-            // Manually update mouse position for button detection
-            POINT mousePos;
-            if (GetCursorPos(&mousePos))
-            {
-                ScreenToClient(g_hWnd, &mousePos);
-                io.MousePos = ImVec2((float)mousePos.x, (float)mousePos.y);
-            }
-
-            // Update mouse button states
-            extern bool MouseLButton;
-            io.MouseDown[0] = MouseLButton;
-        }
+        // The SDL3 backend fills display size and mouse/keyboard from the SDL
+        // events fed via ImGui_ImplSDL3_ProcessEvent, so it works the same
+        // whether the editor is open or only the "Open Editor" button is shown
+        // (issue #442) - no manual Win32 frame setup needed.
+        ImGui_ImplSDL3_NewFrame();
 
         ImGui::NewFrame();
         m_bFrameStarted = true;
@@ -403,15 +461,24 @@ void CMuEditorCore::Render()
     m_bHoveringUI = false;
 
     // Render toolbar (handles both open and closed states)
-    g_MuEditorUI.RenderToolbar(m_bEditorMode, m_bShowItemEditor, m_bShowSkillEditor);
+    g_MuEditorUI.RenderToolbar(m_bEditorMode, m_bShowItemEditor, m_bShowSkillEditor, m_bShowDevEditor, m_bShowConsole);
 
     if (m_bEditorMode)
     {
         // Render center pane (handles all editor windows and input blocking)
         g_MuEditorCenterPaneUI.Render(m_bShowItemEditor, m_bShowSkillEditor);
 
-        // Render console
-        g_MuEditorConsoleUI.Render();
+        // Render Dev Editor
+        if (m_bShowDevEditor)
+        {
+            g_DevEditorUI.Render(&m_bShowDevEditor);
+        }
+
+        // Render console (if enabled)
+        if (m_bShowConsole)
+        {
+            g_MuEditorConsoleUI.Render();
+        }
     }
 
     // Store current hover state for next frame's input blocking
@@ -422,9 +489,12 @@ void CMuEditorCore::Render()
     extern bool g_bRenderGameCursor;
     g_bRenderGameCursor = !m_bHoveringUI;
 
+#ifdef _WIN32
     // Manage Windows cursor visibility
     // Windows maintains an internal display counter - cursor is visible when counter >= 0
-    // We need to loop to force the counter to the correct state
+    // We need to loop to force the counter to the correct state.
+    // Off Windows the SDL/ImGui backend drives the OS cursor itself, and the
+    // ShowCursor stub returns a constant so these loops would never terminate.
     static bool lastHoveringState = false;
     if (m_bHoveringUI != lastHoveringState)
     {
@@ -440,6 +510,7 @@ void CMuEditorCore::Render()
         }
         lastHoveringState = m_bHoveringUI;
     }
+#endif
 
     // Render ImGui and reset frame state
     ImGui::Render();

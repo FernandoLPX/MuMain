@@ -2,8 +2,8 @@
 
 // SceneCommon.h - Shared utilities used by multiple scenes
 
-#include <windows.h>
-#include "../ZzzInfomation.h"  // For MAX_CHARACTERS_PER_ACCOUNT
+#include "Core/Platform/WinCompat.h"
+#include "Engine/Object/ZzzInfomation.h"  // For MAX_CHARACTERS_PER_ACCOUNT
 
 //=============================================================================
 // Character Selection State
@@ -111,7 +111,6 @@ bool CheckName();
 BOOL CheckOptionMouseClick(int iOptionPos_y, BOOL bPlayClickSound = TRUE);
 int SeparateTextIntoLines(const wchar_t* lpszText, wchar_t* lpszSeparated, int iMaxLine, int iLineSize);
 void SetEffectVolumeLevel(int level);
-void SetViewPortLevel(int level);
 
 // Rendering utilities
 void RenderInfomation3D();

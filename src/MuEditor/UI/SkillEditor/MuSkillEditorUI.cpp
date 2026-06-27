@@ -6,10 +6,10 @@
 #include "SkillEditorTable.h"
 #include "SkillEditorActions.h"
 #include "SkillEditorPopups.h"
-#include "GameData/SkillData/SkillFieldMetadata.h"
+#include "Data/GameData/SkillData/SkillFieldMetadata.h"
 #include "../MuEditor/Core/MuEditorCore.h"
 #include "../MuEditor/Config/MuEditorConfig.h"
-#include "Translation/i18n.h"
+#include "I18N/All.h"
 #include "imgui.h"
 #include <algorithm>
 #include <cctype>
@@ -21,6 +21,7 @@
 CMuSkillEditorUI::CMuSkillEditorUI()
     : m_selectedRow(-1)
     , m_bFreezeColumns(false)
+    , m_bShowHoverTooltip(false)
     , m_pTable(nullptr)
 {
     memset(m_szSkillSearchBuffer, 0, sizeof(m_szSkillSearchBuffer));
@@ -93,7 +94,7 @@ void CMuSkillEditorUI::Render(bool& showEditor)
     );
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
-    if (ImGui::Begin(EDITOR_TEXT("label_skill_editor_title"), &showEditor, flags))
+    if (ImGui::Begin(I18N::Editor::SkillEditor, &showEditor, flags))
     {
         // Clamp window position to stay within bounds
         ImVec2 windowPos = ImGui::GetWindowPos();
@@ -139,7 +140,11 @@ void CMuSkillEditorUI::Render(bool& showEditor)
 
         // Freeze columns checkbox
         ImGui::SameLine();
-        ImGui::Checkbox(EDITOR_TEXT("label_freeze_columns"), &m_bFreezeColumns);
+        ImGui::Checkbox(I18N::Editor::FreezeIndexName, &m_bFreezeColumns);
+
+        // Row hover tooltip toggle (opt-in)
+        ImGui::SameLine();
+        ImGui::Checkbox("Show tooltip on hover", &m_bShowHoverTooltip);
 
         ImGui::Separator();
 
@@ -147,7 +152,7 @@ void CMuSkillEditorUI::Render(bool& showEditor)
         std::string searchFilter = m_szSkillSearchBuffer;
         std::transform(searchFilter.begin(), searchFilter.end(), searchFilter.begin(), ::tolower);
 
-        m_pTable->Render(searchFilter, m_columnVisibility, m_selectedRow, m_bFreezeColumns);
+        m_pTable->Render(searchFilter, m_columnVisibility, m_selectedRow, m_bFreezeColumns, m_bShowHoverTooltip);
 
         // Render popups
         CSkillEditorPopups::RenderPopups();
@@ -158,23 +163,23 @@ void CMuSkillEditorUI::Render(bool& showEditor)
 void CMuSkillEditorUI::RenderSearchBar()
 {
     ImGui::SetNextItemWidth(200);
-    ImGui::InputTextWithHint("##SkillSearch", EDITOR_TEXT("label_search_skills"), m_szSkillSearchBuffer, sizeof(m_szSkillSearchBuffer));
+    ImGui::InputTextWithHint("##SkillSearch", I18N::Editor::SearchSkills, m_szSkillSearchBuffer, sizeof(m_szSkillSearchBuffer));
 }
 
 void CMuSkillEditorUI::RenderColumnVisibilityMenu()
 {
-    if (ImGui::Button(EDITOR_TEXT("btn_columns")))
+    if (ImGui::Button(I18N::Editor::Columns))
     {
         ImGui::OpenPopup("ColumnVisibility");
     }
 
     if (ImGui::BeginPopup("ColumnVisibility"))
     {
-        ImGui::Text("%s", EDITOR_TEXT("popup_toggle_columns"));
+        ImGui::Text("%s", I18N::Editor::ToggleColumnVisibility);
         ImGui::Separator();
 
         // Select All / Unselect All buttons
-        if (ImGui::Button(EDITOR_TEXT("btn_select_all"), ImVec2(120, 0)))
+        if (ImGui::Button(I18N::Editor::SelectAll, ImVec2(120, 0)))
         {
             for (auto& pair : m_columnVisibility)
             {
@@ -182,7 +187,7 @@ void CMuSkillEditorUI::RenderColumnVisibilityMenu()
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button(EDITOR_TEXT("btn_unselect_all"), ImVec2(120, 0)))
+        if (ImGui::Button(I18N::Editor::UnselectAll, ImVec2(120, 0)))
         {
             for (auto& pair : m_columnVisibility)
             {
@@ -193,7 +198,7 @@ void CMuSkillEditorUI::RenderColumnVisibilityMenu()
         ImGui::Separator();
 
         // Index column (special)
-        ImGui::Checkbox(EDITOR_TEXT("label_index"), &m_columnVisibility["Index"]);
+        ImGui::Checkbox(I18N::Editor::Index, &m_columnVisibility["Index"]);
 
         // All metadata fields
         const SkillFieldDescriptor* fields = GetSkillFieldDescriptors();
@@ -201,7 +206,7 @@ void CMuSkillEditorUI::RenderColumnVisibilityMenu()
 
         for (int i = 0; i < fieldCount; ++i)
         {
-            const char* displayName = GetSkillFieldDisplayName(fields[i].name);
+            const char* displayName = GetSkillFieldDisplayName(fields[i]);
             ImGui::Checkbox(displayName, &m_columnVisibility[fields[i].name]);
         }
 

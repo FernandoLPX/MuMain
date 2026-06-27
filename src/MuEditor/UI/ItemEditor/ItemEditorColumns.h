@@ -2,9 +2,13 @@
 
 #ifdef _EDITOR
 
+#ifdef _WIN32
 #include <windows.h>
-#include "GameData/ItemData/ItemFieldMetadata.h"
-#include "_struct.h"
+#else
+#include "Core/Platform/WinCompat.h"
+#endif
+#include "Data/GameData/ItemData/ItemFieldMetadata.h"
+#include "Core/Globals/_struct.h"
 
 // Forward declaration
 class CItemEditorTable;

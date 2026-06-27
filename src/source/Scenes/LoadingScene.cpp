@@ -2,17 +2,18 @@
 // File: LoadingScene.cpp
 //*****************************************************************************
 
-#include "../stdafx.h"
+#include "stdafx.h"
 
 #include "LoadingScene.h"
 
-#include "../Input.h"
-#include "../UIMng.h"
-#include "../ZzzOpenglUtil.h"
-#include "../ZzzTexture.h"
+#include "Core/Input/Input.h"
+#include "UI/Legacy/UIMng.h"
+#include "Render/Textures/ZzzOpenglUtil.h"
+#include "Render/Textures/ZzzTexture.h"
 #include "SceneCore.h"
-#include "../ZzzInterface.h"
+#include "Engine/Object/ZzzInterface.h"
 #include "SceneCommon.h"
+#include "UI/NewUI/Dialogs/ReconnectDialog.h"
 
 
 #ifdef _EDITOR
@@ -86,7 +87,7 @@ void LoadingScene(HDC hDC)
         rUIMng.m_pLoadingScene->Create();
     }
 
-    FogEnable = false;
+    FogEnable = true;
     ::BeginOpengl();
     ::glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     ::BeginBitmap();
@@ -109,7 +110,8 @@ void LoadingScene(HDC hDC)
         EndBitmap();
     }
 #endif
-    ::SwapBuffers(hDC);
+    UI::Reconnect::RenderDialog();
+    PlatformSwapBuffers();
 
     SAFE_DELETE(rUIMng.m_pLoadingScene);
 

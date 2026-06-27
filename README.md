@@ -1,6 +1,7 @@
 ﻿# MU Online Client Sources
 
 [![MinGW Build](https://github.com/sven-n/MuMain/actions/workflows/mingw-build.yml/badge.svg?branch=main)](https://github.com/sven-n/MuMain/actions/workflows/mingw-build.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sven-n/MuMain)
 
 This is my special fork of the Season 5.2 client sources [uploaded by Luois](https://github.com/LouisEmulator/Main5.2).
 
@@ -42,6 +43,7 @@ What I have done so far:
     * Glow for red, blue and black fenrir
     * Additional screen resolutions
   * 🔥 Incorporated MU Helper UI and logic - there's some work to do but core functionality is usable
+  * 🔥 Auto-reconnect system
   * Removed if-defs for Rage Fighter class as we are targeting Season 6, so Rage
     Fighter should always be included.
   * Some minor bug fixes, e.g.:
@@ -49,7 +51,7 @@ What I have done so far:
     * Ancient set labels
   * The code has been refactored. A lot of magic values have been replaced by
     enums and constants.
-  * 🔥 New Translation system (see [TRANSLATION_SYSTEM_INTEGRATION.md](TRANSLATION_SYSTEM_INTEGRATION.md))
+  * 🔥 New Translation system (see [docs/translation-system.md](docs/translation-system.md))
 
 What needs to be done for Season 6:
   * Lucky Items
@@ -64,32 +66,34 @@ What needs to be done for Season 6:
 
 ### First Time Setup - Initialize Submodules
 
-The project uses ImGui as a git submodule for the in-game editor (debug builds only). After cloning the repository, you must initialize the submodules
-if CMake did not do this automatically which it should
+The project uses three git submodules under `src/ThirdParty/`:
+
+- `SDL` - windowing, input and audio backend (required for all builds)
+- `SDL_mixer` - audio mixer (required for all builds)
+- `imgui` - in-game editor UI (only needed when built with `-DENABLE_EDITOR=ON`, independent of Debug/Release)
+
+CMake initializes these automatically on first configure. If that fails for any reason, run from the repository root:
 
 ```bash
-# From the repository root
 git submodule update --init
 ```
 
-This will download the ImGui library into `src/ThirdParty/imgui`.
-
-**Note:** This is only required for **Debug builds** (`Global Debug` configuration). Release builds do not require ImGui.
-
 ### Build Configurations
 
-#### Debug Builds (`Global Debug`)
-- Includes the in-game MU Editor (ImGui-based)
-- Requires ImGui submodule to be initialized (see above)
+There are two orthogonal choices: **editor on/off** (configure-time, picked via preset) and **Debug/Release** (build-time).
+
+#### Editor builds (`windows-x86-mueditor` / `windows-x64-mueditor`)
+- Configure preset sets `ENABLE_EDITOR=ON`
+- Includes the in-game MU Editor (ImGui-based); the `imgui` submodule must be initialized
 - Press **F12** in-game to toggle the editor
 - Start with `--editor` flag to launch with editor enabled
 - Preprocessor define: `_EDITOR`
 
-#### Release Builds (`Global Release`)
-- No editor code included
-- ImGui submodule not required
-- Optimized for production use
+#### Standard builds (`windows-x86` / `windows-x64`)
+- Configure preset sets `ENABLE_EDITOR=OFF`; no editor code is compiled in and the `imgui` submodule is not initialized
 - Zero editor overhead
+
+Either configuration can be built as Debug or Release via the corresponding build preset (`*-debug` or `*-release`).
 
 ### Building with CMake and MinGW-w64 (Linux)
 
@@ -292,6 +296,31 @@ It supports the common starting parameters `/u` and `/p`, example: `main.exe con
 The [OpenMU launcher](https://github.com/MUnique/OpenMU/releases/download/v0.8.17/MUnique.OpenMU.ClientLauncher_0.8.17.zip)
 will work as well. By default, it connects to localhost and port `44406`.
 The client identifies itself with Version `2.04d` and serial `k1Pk2jcET48mxL3b`.
+
+## Documentation
+
+- [Camera system](docs/camera-system.md) - modes, switching (F9), config,
+  frustum culling, `$details` overlay, and the gameplay behaviour changes
+  from the 3D camera rework.
+- [DevEditor](docs/dev-editor.md) - the in-game tuning UI (F12, debug
+  builds only).
+- [Options window and config](docs/options-window.md) - runtime
+  resolution / windowed toggle, slider rounding, and what the options
+  window stores in `config.ini`.
+- [Build guide](docs/build/README.md) - platform-specific build notes.
+- [Translation system](docs/translation-system.md) - how the .resx ->
+  generated C++ accessors pipeline works, how to add a string or a locale,
+  runtime locale switching, and observer hooks for cached UI strings.
+
+## Contributing
+
+### Coding rules
+
+All code changes - by humans and AI assistants - should follow
+[`docs/CODING_RULES.md`](docs/CODING_RULES.md). Read it before opening a PR.
+
+AI coding assistants (Claude Code, Cursor, Codex, etc.) should also read
+[`AGENTS.md`](AGENTS.md), which points at the same rules and at the build guide.
 
 ## Credits
 

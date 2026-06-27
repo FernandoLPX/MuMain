@@ -7,9 +7,9 @@
 #pragma once
 
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
-#include "UIControls.h"
-#include "NewUICommonMessageBox.h"
-#include "./GameShop/ShopListManager/ShopPackage.h"
+#include "UI/Legacy/UIControls.h"
+#include "UI/NewUI/Dialogs/NewUICommonMessageBox.h"
+#include "GameShop/ShopListManager/ShopPackage.h"
 
 using namespace SEASON3B;
 

@@ -56,6 +56,7 @@ namespace MUHelper
 		ActionSkillType SelectAttackSkill();
 		int SimulateAttack(ActionSkillType iSkill);
 		int SimulateSkill(ActionSkillType iSkill, bool bTargetRequired, int iTarget);
+		int SimulateBasicAttack(int iTarget);
 		int SimulateComboAttack();
 		int GetNearestTarget();
 		int GetFarthestAttackingTarget();
@@ -70,6 +71,7 @@ namespace MUHelper
 		ActionSkillType GetHealingSkill();
 		ActionSkillType GetDrainLifeSkill();
 		bool HasAssignedBuffSkill();
+		bool IsSelfPositionSkill(ActionSkillType iSkill);
 
 	private:
 		ConfigData m_config;

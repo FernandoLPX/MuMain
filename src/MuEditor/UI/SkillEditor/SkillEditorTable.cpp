@@ -4,11 +4,12 @@
 
 #include "SkillEditorTable.h"
 #include "SkillEditorColumns.h"
-#include "GameData/SkillData/SkillFieldMetadata.h"
+#include "SkillTooltipEditor.h"
+#include "Data/GameData/SkillData/SkillFieldMetadata.h"
 #include "../MuEditor/UI/Console/MuEditorConsoleUI.h"
-#include "Translation/i18n.h"
-#include "_struct.h"
-#include "_define.h"
+#include "I18N/All.h"
+#include "Core/Globals/_struct.h"
+#include "Core/Globals/_define.h"
 #include "imgui.h"
 #include <algorithm>
 #include <sstream>
@@ -49,7 +50,8 @@ void CSkillEditorTable::Render(
     const std::string& searchFilter,
     std::map<std::string, bool>& columnVisibility,
     int& selectedRow,
-    bool freezeColumns)
+    bool freezeColumns,
+    bool showHoverTooltip)
 {
     // Get metadata fields once at function scope
     const SkillFieldDescriptor* fields = GetSkillFieldDescriptors();
@@ -76,7 +78,7 @@ void CSkillEditorTable::Render(
 
     if (visibleColumnCount == 0)
     {
-        ImGui::Text(EDITOR_TEXT("label_no_columns"));
+        ImGui::Text(I18N::Editor::NoColumnsSelectedClickColumnsToShowColumns);
         return;
     }
 
@@ -145,7 +147,7 @@ void CSkillEditorTable::Render(
         bool indexVisible = columnVisibility.find("Index") != columnVisibility.end() && columnVisibility["Index"];
         if (indexVisible)
         {
-            ImGui::TableSetupColumn(EDITOR_TEXT("label_index"), ImGuiTableColumnFlags_None, 60.0f);
+            ImGui::TableSetupColumn(I18N::Editor::Index, ImGuiTableColumnFlags_None, 60.0f);
         }
 
         for (int i = 0; i < fieldCount; ++i)
@@ -153,7 +155,7 @@ void CSkillEditorTable::Render(
             if (columnVisibility.find(fields[i].name) != columnVisibility.end() &&
                 columnVisibility[fields[i].name])
             {
-                const char* displayName = GetSkillFieldDisplayName(fields[i].name);
+                const char* displayName = GetSkillFieldDisplayName(fields[i]);
                 ImGui::TableSetupColumn(displayName, ImGuiTableColumnFlags_None, fields[i].width);
             }
         }
@@ -189,6 +191,18 @@ void CSkillEditorTable::Render(
                 ImGui::TableNextRow();
                 ImGui::PushID(skillIndex);
 
+                // Invisible row-spanning selectable for hover detection.
+                // Save/restore cursor Y so the Selectable's height doesn't
+                // push column content onto a second line, and use AllowOverlap
+                // so column items still receive their own clicks.
+                ImGui::TableSetColumnIndex(0);
+                const float rowCursorY = ImGui::GetCursorPosY();
+                ImGui::Selectable("##rowhover", false,
+                    ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+                    ImVec2(0, ImGui::GetTextLineHeight()));
+                const bool rowHovered = ImGui::IsItemHovered();
+                ImGui::SetCursorPosY(rowCursorY);
+
                 bool rowInteracted = false;
                 int colIdx = 0;
 
@@ -204,6 +218,11 @@ void CSkillEditorTable::Render(
                     bool isVisible = columnVisibility.find(fields[i].name) != columnVisibility.end() &&
                                      columnVisibility[fields[i].name];
                     m_pColumns->RenderFieldByDescriptor(fields[i], colIdx, skillIndex, skill, rowInteracted, isVisible);
+                }
+
+                if (rowHovered && showHoverTooltip)
+                {
+                    MuEditor::Skills::Tooltip::Render(skillIndex);
                 }
 
                 // Update selected row

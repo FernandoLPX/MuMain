@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ZzzInfomation.h"
-#include "SpinLock.h"
+#include "Engine/Object/ZzzInfomation.h"
+#include "Core/Utilities/SpinLock.h"
 
 // Include refactored scene headers
 #ifdef USE_REFACTORED_SCENES
@@ -36,7 +36,6 @@ int	SeparateTextIntoLines(const wchar_t* lpszText, wchar_t* lpszSeparated, int i
 
 bool	GetTimeCheck(int DelayTime);
 void	SetEffectVolumeLevel(int level);
-void    SetViewPortLevel(int level);
 
 bool IsEnterPressed();
 void SetEnterPressed(bool enterpressed);

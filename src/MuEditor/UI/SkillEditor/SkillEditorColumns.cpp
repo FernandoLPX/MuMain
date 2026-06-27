@@ -5,10 +5,10 @@
 #include "SkillEditorColumns.h"
 #include "SkillEditorTable.h"
 #include "../MuEditor/UI/Console/MuEditorConsoleUI.h"
-#include "GameData/SkillData/SkillFieldDefs.h"
-#include "Translation/i18n.h"
-#include "_struct.h"
-#include "_define.h"
+#include "Data/GameData/SkillData/SkillFieldDefs.h"
+#include "I18N/All.h"
+#include "Core/Globals/_struct.h"
+#include "Core/Globals/_define.h"
 #include "imgui.h"
 #include <algorithm>
 #include <sstream>
@@ -221,7 +221,7 @@ void CSkillEditorColumns::RenderIndexColumn(int& colIdx, int skillIndex, bool& r
         }
         else if (!m_errorLogged)
         {
-            std::string errorMsg = i18n::FormatEditor("error_index_in_use", {
+            std::string errorMsg = I18N::Format(I18N::Editor::ErrorIndex0AlreadyInUse, {
                 std::to_string(newIndex)
             });
             g_MuEditorConsoleUI.LogEditor(errorMsg);

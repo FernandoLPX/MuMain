@@ -5,7 +5,7 @@
 #include "MuInputBlockerCore.h"
 
 #include "imgui.h"
-#include "NewUICommon.h"
+#include "UI/NewUI/NewUICommon.h"
 
 CMuInputBlockerCore& CMuInputBlockerCore::GetInstance()
 {
@@ -28,6 +28,7 @@ void CMuInputBlockerCore::ProcessInputBlocking()
     extern bool MouseLButton, MouseLButtonPop, MouseLButtonPush, MouseLButtonDBClick;
     extern bool MouseRButton, MouseRButtonPop, MouseRButtonPush;
     extern bool MouseMButton;
+    extern int MouseWheel;
 
     MouseLButton = false;
     MouseLButtonPop = false;
@@ -37,6 +38,7 @@ void CMuInputBlockerCore::ProcessInputBlocking()
     MouseRButtonPop = false;
     MouseRButtonPush = false;
     MouseMButton = false;
+    MouseWheel = 0;  // Block mouse wheel when ImGui wants mouse input
 
     // Block Enter key when hovering UI or when keyboard input is wanted
     // This prevents chat from opening when pressing Enter in input fields

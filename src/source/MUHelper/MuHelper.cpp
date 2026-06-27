@@ -1,19 +1,22 @@
 #include "stdafx.h"
+#include "GameLogic/Combat/SkillExecution.h"
 
 #include <thread>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 
-#include "ZzzAI.h"
-#include "ZzzCharacter.h"
-#include "ZzzInterface.h"
-#include "NewUISystem.h"
-#include "Utilities/Log/muConsoleDebug.h"
-#include "SkillManager.h"
-#include "PartyManager.h"
-#include "MapManager.h"
-#include "WSclient.h"
+#include "Engine/AI/ZzzAI.h"
+#include "Engine/Object/ZzzCharacter.h"
+#include "Engine/Object/ZzzInterface.h"
+#include "Engine/Object/PlayerActionState.h"
+#include "UI/NewUI/NewUISystem.h"
+#include "Core/Utilities/Log/muConsoleDebug.h"
+#include "Character/CharacterManager.h"
+#include "GameLogic/Skills/SkillManager.h"
+#include "GameLogic/Social/PartyManager.h"
+#include "World/MapInfra/MapManager.h"
+#include "Network/Server/WSclient.h"
 
 #include "MuHelper.h"
 
@@ -67,6 +70,12 @@ namespace MUHelper
         if (m_bActive)
         {
             TriggerStop();
+
+            // Stop the client-driven bot immediately instead of waiting for the
+            // server's status reply. After an auto-reconnect the server's new
+            // session doesn't have the helper marked active, so it never replies
+            // and the bot would otherwise keep running with no way to stop it.
+            Stop();
         }
         else
         {
@@ -96,6 +105,7 @@ namespace MUHelper
         m_iComboState = 0;
         m_iCurrentBuffIndex = 0;
         m_iCurrentBuffPartyIndex = 0;
+        m_iCurrentHealPartyIndex = 0;
         m_iCurrentTarget = -1;
         m_iCurrentSkill = (ActionSkillType)m_config.aiSkill[0];
         m_iCurrentItem = MAX_ITEMS;
@@ -224,9 +234,8 @@ namespace MUHelper
             _targetsLock.unlock();
         }
 
-        if (m_config.bUseSelfDefense)
+        if (m_config.bUseSelfDefense && IsMonster(pTarget))
         {
-            pTarget->Object.Kind = KIND_MONSTER;
             m_iCurrentTarget = iTargetId;
         }
     }
@@ -263,17 +272,15 @@ namespace MUHelper
 
     int CMuHelper::ComputeDistanceFromTarget(CHARACTER* pTarget)
     {
-        POINT posA, posB;
+        const POINT posHero = { Hero->PositionX, Hero->PositionY };
 
-        posA = { Hero->PositionX, Hero->PositionY };
-        posB = { pTarget->PositionX, pTarget->PositionY };
-        int iPrevDistance = ComputeDistanceBetween(posA, posB);
+        const POINT posCurrent = { pTarget->PositionX, pTarget->PositionY };
+        const POINT posNext    = { pTarget->TargetX,   pTarget->TargetY };
 
-        posA = { Hero->PositionX, Hero->PositionY };
-        posB = { pTarget->TargetX, pTarget->TargetX };
-        int iNextDistance = ComputeDistanceBetween(posA, posB);
-
-        return std::min<int>(iPrevDistance, iNextDistance);
+        return std::min(
+            ComputeDistanceBetween(posHero, posCurrent),
+            ComputeDistanceBetween(posHero, posNext)
+        );
     }
 
     int CMuHelper::ComputeDistanceBetween(POINT posA, POINT posB)
@@ -287,8 +294,7 @@ namespace MUHelper
     int CMuHelper::GetNearestTarget()
     {
         int iClosestMonsterId = -1;
-        int iMinDistance = m_config.iHuntingRange + 1;
-
+        int iMinDistance = m_iHuntingDistance;
         std::set<int> setTargets;
         {
             _targetsLock.lock();
@@ -301,8 +307,13 @@ namespace MUHelper
             int iIndex = FindCharacterIndex(iMonsterId);
             CHARACTER* pTarget = &CharactersClient[iIndex];
 
+            if (!IsMonster(pTarget))
+            {
+                continue;
+            }
+
             int iDistance = ComputeDistanceFromTarget(pTarget);
-            if (iDistance < iMinDistance)
+            if (iDistance <= iMinDistance)
             {
                 iMinDistance = iDistance;
                 iClosestMonsterId = iMonsterId;
@@ -328,6 +339,11 @@ namespace MUHelper
         {
             int iIndex = FindCharacterIndex(iMonsterId);
             CHARACTER* pTarget = &CharactersClient[iIndex];
+
+            if (!IsMonster(pTarget))
+            {
+                continue;
+            }
 
             int iDistance = ComputeDistanceFromTarget(pTarget);
             if (iDistance > iMaxDistance)
@@ -355,10 +371,11 @@ namespace MUHelper
             if (iIndex == MAX_CHARACTERS_CLIENT)
             {
                 DeleteTarget(iMonsterId);
+                continue;
             }
 
             CHARACTER* pTarget = &CharactersClient[iIndex];
-            if (!pTarget || (pTarget && (pTarget->Dead > 0 || !pTarget->Object.Live)))
+            if (pTarget->Dead > 0 || !pTarget->Object.Live)
             {
                 DeleteTarget(iMonsterId);
             }
@@ -379,15 +396,15 @@ namespace MUHelper
 
         if (m_config.iDarkRavenMode == PET_ATTACK_CEASE)
         {
-            SocketClient->ToGameServer()->SendPetCommandRequest(PET_TYPE_DARK_SPIRIT, AT_PET_COMMAND_DEFAULT, 0xFFFF);
+            SocketClient->ToGameServer()->SendPetCommandRequest(PetType::DarkRaven, PetCommandMode::Normal, 0xFFFF);
         }
         else if (m_config.iDarkRavenMode == PET_ATTACK_AUTO)
         {
-            SocketClient->ToGameServer()->SendPetCommandRequest(PET_TYPE_DARK_SPIRIT, AT_PET_COMMAND_RANDOM, 0xFFFF);
+            SocketClient->ToGameServer()->SendPetCommandRequest(PetType::DarkRaven, PetCommandMode::AttackRandom, 0xFFFF);
         }
         else if (m_config.iDarkRavenMode == PET_ATTACK_TOGETHER)
         {
-            SocketClient->ToGameServer()->SendPetCommandRequest(PET_TYPE_DARK_SPIRIT, AT_PET_COMMAND_OWNER, 0xFFFF);
+            SocketClient->ToGameServer()->SendPetCommandRequest(PetType::DarkRaven, PetCommandMode::AttackWithOwner, 0xFFFF);
         }
 
         m_bPetActivated = true;
@@ -457,74 +474,80 @@ namespace MUHelper
 
     int CMuHelper::BuffTarget(CHARACTER* pTargetChar, ActionSkillType iBuffSkill)
     {
-        // TODO: List other buffs here
-        if ((iBuffSkill == AT_SKILL_ATTACK
-            || iBuffSkill == AT_SKILL_ATTACK_STR)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_Attack) || m_bTimerActivatedBuffOngoing))
-        {
-            return SimulateSkill(iBuffSkill, true, pTargetChar->Key);
-        }
+        OBJECT* obj = &pTargetChar->Object;
 
-        if ((iBuffSkill == AT_SKILL_DEFENSE
-            || iBuffSkill == AT_SKILL_DEFENSE_STR
-            || iBuffSkill == AT_SKILL_DEFENSE_MASTERY)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_Defense) || m_bTimerActivatedBuffOngoing))
+        auto CastIfMissing = [&](bool bBuffActive, bool bTimerRespected, bool bNeedsTarget) -> int
         {
-            return SimulateSkill(iBuffSkill, true, pTargetChar->Key);
-        }
+            if (!bBuffActive || (bTimerRespected && m_bTimerActivatedBuffOngoing))
+                return SimulateSkill(iBuffSkill, bNeedsTarget, pTargetChar->Key);
+            return 1;
+        };
 
-        if ((iBuffSkill == AT_SKILL_INFINITY_ARROW || iBuffSkill == AT_SKILL_INFINITY_ARROW_STR) &&
-            (!g_isCharacterBuff((&pTargetChar->Object), eBuff_InfinityArrow)))
+        switch (iBuffSkill)
         {
-            return SimulateSkill(iBuffSkill, false, pTargetChar->Key);
-        }
+        case AT_SKILL_ATTACK:
+        case AT_SKILL_ATTACK_STR:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Attack), true, true);
 
-        if ((iBuffSkill == AT_SKILL_SOUL_BARRIER
-            || iBuffSkill == AT_SKILL_SOUL_BARRIER_STR
-            || iBuffSkill == AT_SKILL_SOUL_BARRIER_PROFICIENCY)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_WizDefense) || m_bTimerActivatedBuffOngoing))
-        {
-            return SimulateSkill(iBuffSkill, true, pTargetChar->Key);
-        }
+        case AT_SKILL_DEFENSE:
+        case AT_SKILL_DEFENSE_STR:
+        case AT_SKILL_DEFENSE_MASTERY:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Defense), true, true);
 
-        if ((iBuffSkill == AT_SKILL_SWELL_LIFE
-            || iBuffSkill == AT_SKILL_SWELL_LIFE_STR
-            || iBuffSkill == AT_SKILL_SWELL_LIFE_PROFICIENCY)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_Life) || m_bTimerActivatedBuffOngoing))
-        {
+        case AT_SKILL_INFINITY_ARROW:
+        case AT_SKILL_INFINITY_ARROW_STR:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_InfinityArrow), false, false);
+
+        case AT_SKILL_SOUL_BARRIER:
+        case AT_SKILL_SOUL_BARRIER_STR:
+        case AT_SKILL_SOUL_BARRIER_PROFICIENCY:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_WizDefense), true, true);
+
+        case AT_SKILL_SWELL_LIFE:
+        case AT_SKILL_SWELL_LIFE_STR:
+        case AT_SKILL_SWELL_LIFE_PROFICIENCY:
             if (m_iComboState == 2)
             {
                 return 1;
             }
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Life), true, false);
 
-            return SimulateSkill(iBuffSkill, false, pTargetChar->Key);
-        }
+        case AT_SKILL_EXPANSION_OF_WIZARDRY:
+        case AT_SKILL_EXPANSION_OF_WIZARDRY_STR:
+        case AT_SKILL_EXPANSION_OF_WIZARDRY_MASTERY:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_SwellOfMagicPower), false, false);
 
-        if ((iBuffSkill == AT_SKILL_EXPANSION_OF_WIZARDRY || iBuffSkill == AT_SKILL_EXPANSION_OF_WIZARDRY_STR || iBuffSkill == AT_SKILL_EXPANSION_OF_WIZARDRY_MASTERY)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_SwellOfMagicPower)))
-        {
-            return SimulateSkill(iBuffSkill, false, pTargetChar->Key);
-        }
+        case AT_SKILL_ADD_CRITICAL:
+        case AT_SKILL_ADD_CRITICAL_STR1:
+        case AT_SKILL_ADD_CRITICAL_STR2:
+        case AT_SKILL_ADD_CRITICAL_STR3:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_AddCriticalDamage), false, false);
 
-        if ((iBuffSkill == AT_SKILL_ADD_CRITICAL || iBuffSkill == AT_SKILL_ADD_CRITICAL_STR1 || iBuffSkill == AT_SKILL_ADD_CRITICAL_STR2 || iBuffSkill == AT_SKILL_ADD_CRITICAL_STR3)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_AddCriticalDamage)))
-        {
-            return SimulateSkill(iBuffSkill, false, pTargetChar->Key);
-        }
+        case AT_SKILL_ALICE_BERSERKER:
+        case AT_SKILL_ALICE_BERSERKER_STR:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Berserker), false, false);
 
-        if ((iBuffSkill == AT_SKILL_ALICE_BERSERKER || iBuffSkill == AT_SKILL_ALICE_BERSERKER_STR)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_Berserker)))
-        {
-            return SimulateSkill(iBuffSkill, false, pTargetChar->Key);
-        }
-        if ((iBuffSkill == AT_SKILL_ALICE_THORNS)
-            && (!g_isCharacterBuff((&pTargetChar->Object), eBuff_Thorns)))
-        {
-            return SimulateSkill(iBuffSkill, false, pTargetChar->Key);
-        }
+        case AT_SKILL_ALICE_THORNS:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Thorns), false, false);
 
-        return 1;
+        // Rage Fighter party buffs — self/party AoE, no explicit target needed.
+        case AT_SKILL_ATT_UP_OURFORCES:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Att_up_Ourforces), true, false);
+
+        case AT_SKILL_HP_UP_OURFORCES:
+        case AT_SKILL_HP_UP_OURFORCES_STR:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Hp_up_Ourforces), true, false);
+
+        case AT_SKILL_DEF_UP_OURFORCES:
+        case AT_SKILL_DEF_UP_OURFORCES_STR:
+        case AT_SKILL_DEF_UP_OURFORCES_MASTERY:
+            return CastIfMissing(g_isCharacterBuff(obj, eBuff_Def_up_Ourforces), true, false);
+
+        default:
+            return 1;
+        }
     }
+
 
     int CMuHelper::ConsumePotion()
     {
@@ -584,21 +607,25 @@ namespace MUHelper
         {
             PARTY_t* pMember = &Party[m_iCurrentHealPartyIndex];
             CHARACTER* pChar = g_pPartyManager->GetPartyMemberChar(pMember);
+            int iHealResult = 1;
 
             if (pChar != NULL)
             {
                 if (pChar == Hero)
                 {
-                    return HealSelf(iHealingSkill);
+                    iHealResult = HealSelf(iHealingSkill);
                 }
                 else if (pMember->Map == gMapManager.WorldActive
                     && pMember->stepHP * 10 <= m_config.iHealPartyThreshold
                     && ComputeDistanceFromTarget(pChar) <= MAX_ACTIONABLE_DISTANCE)
                 {
-                    return SimulateSkill(iHealingSkill, true, pChar->Key);
+                    iHealResult = SimulateSkill(iHealingSkill, true, pChar->Key);
                 }
             }
+
             m_iCurrentHealPartyIndex = (m_iCurrentHealPartyIndex + 1) % (sizeof(Party) / sizeof(Party[0]));
+
+            return iHealResult;
         }
         else
         {
@@ -722,7 +749,19 @@ namespace MUHelper
         m_iCurrentSkill = SelectAttackSkill();
         if (m_iCurrentSkill > AT_SKILL_UNDEFINED)
         {
-            SimulateAttack(m_iCurrentSkill);
+            const float fSkillDistance = gSkillManager.GetSkillDistance(m_iCurrentSkill, Hero);
+            if (GameLogic::Combat::CanExecuteSkill(Hero, m_iCurrentSkill, fSkillDistance))
+            {
+                return SimulateAttack(m_iCurrentSkill);
+            }
+        }
+
+        if (m_config.bFallbackBasicAttack)
+        {
+            if (!Hero->Movement)
+            {
+                return SimulateBasicAttack(m_iCurrentTarget);
+            }
         }
 
         return 1;
@@ -730,85 +769,49 @@ namespace MUHelper
 
     ActionSkillType CMuHelper::SelectAttackSkill()
     {
-        // try skill 2 activation conditions
-        if (m_config.aiSkill[1] > 0 && m_config.aiSkill[1] < MAX_SKILLS)
+        const size_t safeSize = std::min({m_config.aiSkill.size(), m_config.aiSkillCondition.size(), m_config.aiSkillInterval.size()});
+        for (int i = 1; i < (int)safeSize; i++)
         {
-            if ((m_config.aiSkillCondition[1] & ON_TIMER)
-                && m_config.aiSkillInterval[1] != 0
-                && m_iSecondsElapsed % m_config.aiSkillInterval[1] == 0)
+            const int iSkillId = m_config.aiSkill[i];
+            if (iSkillId <= 0 || iSkillId >= MAX_SKILLS)
             {
-                return (ActionSkillType)m_config.aiSkill[1];
+                continue;
             }
 
-            if (m_config.aiSkillCondition[1] & ON_CONDITION)
+            if ((m_config.aiSkillCondition[i] & ON_TIMER)
+                && m_config.aiSkillInterval[i] != 0
+                && m_iSecondsElapsed > 0
+                && m_iSecondsElapsed % m_config.aiSkillInterval[i] == 0)
             {
-                if (m_config.aiSkillCondition[1] & ON_MOBS_NEARBY)
-                {
-                    int iCount = m_setTargets.size();
+                return (ActionSkillType)iSkillId;
+            }
 
-                    if (((m_config.aiSkillCondition[1] & ON_MORE_THAN_TWO_MOBS) && iCount >= 2)
-                        || ((m_config.aiSkillCondition[1] & ON_MORE_THAN_THREE_MOBS) && iCount >= 3)
-                        || ((m_config.aiSkillCondition[1] & ON_MORE_THAN_FOUR_MOBS) && iCount >= 4)
-                        || ((m_config.aiSkillCondition[1] & ON_MORE_THAN_FIVE_MOBS) && iCount >= 5))
-                    {
-                        return (ActionSkillType)m_config.aiSkill[1];
-                    }
+            if (m_config.aiSkillCondition[i] & ON_CONDITION)
+            {
+                int iCount = 0;
+                if (m_config.aiSkillCondition[i] & ON_MOBS_NEARBY)
+                {
+                    iCount = (int)m_setTargets.size();
                 }
-                else if (m_config.aiSkillCondition[1] & ON_MOBS_ATTACKING)
+                else if (m_config.aiSkillCondition[i] & ON_MOBS_ATTACKING)
                 {
-                    int iCount = m_setTargetsAttacking.size();
+                    iCount = (int)m_setTargetsAttacking.size();
+                }
+                else
+                {
+                    continue;
+                }
 
-                    if (((m_config.aiSkillCondition[1] & ON_MORE_THAN_TWO_MOBS) && iCount >= 2)
-                        || ((m_config.aiSkillCondition[1] & ON_MORE_THAN_THREE_MOBS) && iCount >= 3)
-                        || ((m_config.aiSkillCondition[1] & ON_MORE_THAN_FOUR_MOBS) && iCount >= 4)
-                        || ((m_config.aiSkillCondition[1] & ON_MORE_THAN_FIVE_MOBS) && iCount >= 5))
-                    {
-                        return (ActionSkillType)m_config.aiSkill[1];
-                    }
+                if (((m_config.aiSkillCondition[i] & ON_MORE_THAN_TWO_MOBS)   && iCount >= 2)
+                    || ((m_config.aiSkillCondition[i] & ON_MORE_THAN_THREE_MOBS) && iCount >= 3)
+                    || ((m_config.aiSkillCondition[i] & ON_MORE_THAN_FOUR_MOBS)  && iCount >= 4)
+                    || ((m_config.aiSkillCondition[i] & ON_MORE_THAN_FIVE_MOBS)  && iCount >= 5))
+                {
+                    return (ActionSkillType)iSkillId;
                 }
             }
         }
 
-        // try skill 3 activation conditions
-        if (m_config.aiSkill[2] > 0 && m_config.aiSkill[2] < MAX_SKILLS)
-        {
-            if ((m_config.aiSkillCondition[2] & ON_TIMER)
-                && m_config.aiSkillInterval[2] != 0
-                && m_iSecondsElapsed % m_config.aiSkillInterval[2] == 0)
-            {
-                return (ActionSkillType)m_config.aiSkill[2];
-            }
-
-            if (m_config.aiSkillCondition[2] & ON_CONDITION)
-            {
-                if (m_config.aiSkillCondition[2] & ON_MOBS_NEARBY)
-                {
-                    int iCount = m_setTargets.size();
-
-                    if (((m_config.aiSkillCondition[2] & ON_MORE_THAN_TWO_MOBS) && iCount >= 2)
-                        || ((m_config.aiSkillCondition[2] & ON_MORE_THAN_THREE_MOBS) && iCount >= 3)
-                        || ((m_config.aiSkillCondition[2] & ON_MORE_THAN_FOUR_MOBS) && iCount >= 4)
-                        || ((m_config.aiSkillCondition[2] & ON_MORE_THAN_FIVE_MOBS) && iCount >= 5))
-                    {
-                        return (ActionSkillType)m_config.aiSkill[2];
-                    }
-                }
-                else if (m_config.aiSkillCondition[2] & ON_MOBS_ATTACKING)
-                {
-                    int iCount = m_setTargetsAttacking.size();
-
-                    if (((m_config.aiSkillCondition[2] & ON_MORE_THAN_TWO_MOBS) && iCount >= 2)
-                        || ((m_config.aiSkillCondition[2] & ON_MORE_THAN_THREE_MOBS) && iCount >= 3)
-                        || ((m_config.aiSkillCondition[2] & ON_MORE_THAN_FOUR_MOBS) && iCount >= 4)
-                        || ((m_config.aiSkillCondition[2] & ON_MORE_THAN_FIVE_MOBS) && iCount >= 5))
-                    {
-                        return (ActionSkillType)m_config.aiSkill[2];
-                    }
-                }
-            }
-        }
-
-        // no skill for activation yet, default to basic skill
         if (m_config.aiSkill[0] > 0)
         {
             return (ActionSkillType)m_config.aiSkill[0];
@@ -835,6 +838,14 @@ namespace MUHelper
         return 1;
     }
 
+    // True while the hero is mid swing; gating helper actions on it makes the
+    // bot's cadence follow AttackSpeed instead of the fixed helper timer, the
+    // same way the manual click path gates in MoveHero (ZzzInterface.cpp).
+    static bool IsHeroSwingInProgress()
+    {
+        return Engine::Object::IsAttackAction(Hero->Object.CurrentAction);
+    }
+
     int CMuHelper::SimulateAttack(ActionSkillType iSkill)
     {
         return SimulateSkill(iSkill, true, m_iCurrentTarget);
@@ -842,69 +853,114 @@ namespace MUHelper
 
     int CMuHelper::SimulateSkill(ActionSkillType iSkill, bool bTargetRequired, int iTarget)
     {
+        // Let the current swing finish before issuing another action, so the
+        // cadence tracks AttackSpeed instead of the fixed helper timer.
+        if (IsHeroSwingInProgress())
+        {
+            return 0;
+        }
+
         g_MovementSkill.m_iSkill = iSkill;
         g_MovementSkill.m_bMagic = true;
 
-        float fSkillDistance = gSkillManager.GetSkillDistance(iSkill, Hero);
+        const float fSkillDistance = gSkillManager.GetSkillDistance(iSkill, Hero);
+        const bool bSelfPositionSkill = IsSelfPositionSkill(iSkill);
 
         if (bTargetRequired)
         {
-            if (iTarget == -1)
+            if (bSelfPositionSkill)
             {
-                return 0;
-            }
+                TargetX = Hero->PositionX;
+                TargetY = Hero->PositionY;
 
-            SelectedCharacter = FindCharacterIndex(iTarget);
-            if (SelectedCharacter == MAX_CHARACTERS_CLIENT)
-            {
-                DeleteTarget(iTarget);
-                return 0;
-            }
+                g_MovementSkill.m_iTarget = -1;
 
-            CHARACTER* pTarget = &CharactersClient[SelectedCharacter];
-            if (pTarget->Dead > 0)
-            {
-                DeleteTarget(iTarget);
-                return 0;
-            }
-
-            g_MovementSkill.m_iTarget = SelectedCharacter;
-
-            TargetX = (int)(pTarget->Object.Position[0] / TERRAIN_SCALE);
-            TargetY = (int)(pTarget->Object.Position[1] / TERRAIN_SCALE);
-
-            PATH_t tempPath;
-            bool bHasPath = PathFinding2(Hero->PositionX, Hero->PositionY, TargetX, TargetY, &tempPath, m_iHuntingDistance + fSkillDistance);
-            bool bTargetNear = CheckTile(Hero, &Hero->Object, fSkillDistance);
-            bool bNoWall = CheckWall(Hero->PositionX, Hero->PositionY, TargetX, TargetY);
-
-            // target not reachable, ignore it
-            if (!bHasPath)
-            {
-                DeleteTarget(iTarget);
-                return 0;
-            }
-
-            // target is not near or the path is obstructed by a wall, move closer
-            if (!bTargetNear || !bNoWall)
-            {
-                Hero->Path.Lock.lock();
-
-                // Limit movement to 2 steps at a time
-                int pathNum = std::min<int>(tempPath.PathNum, 2);
-                for (int i = 0; i < pathNum; i++)
+                // Check if current target is still valid (exists and alive)
+                if (iTarget != -1)
                 {
-                    Hero->Path.PathX[i] = tempPath.PathX[i];
-                    Hero->Path.PathY[i] = tempPath.PathY[i];
+                    const int iCharIndex = FindCharacterIndex(iTarget);
+                    if (iCharIndex != MAX_CHARACTERS_CLIENT)
+                    {
+                        CHARACTER* pCurrentTarget = &CharactersClient[iCharIndex];
+                        if (pCurrentTarget->Dead > 0 || !IsMonster(pCurrentTarget))
+                        {
+                            DeleteTarget(iTarget);
+                            return 0;
+                        }
+                    }
+                    else
+                    {
+                        DeleteTarget(iTarget);
+                        return 0;
+                    }
                 }
-                Hero->Path.PathNum = pathNum;
-                Hero->Path.CurrentPath = 0;
-                Hero->Path.CurrentPathFloat = 0;
+            }
+            else
+            {
+                if (iTarget == -1)
+                {
+                    return 0;
+                }
 
-                Hero->Path.Lock.unlock();
+                const int iCharIndex = FindCharacterIndex(iTarget);
+                if (iCharIndex == MAX_CHARACTERS_CLIENT)
+                {
+                    DeleteTarget(iTarget);
+                    return 0;
+                }
 
-                SendMove(Hero, &Hero->Object);
-                return 0;
+                SelectedCharacter = iCharIndex;
+
+                CHARACTER* pTarget = &CharactersClient[iCharIndex];
+                if (pTarget->Dead > 0)
+                {
+                    DeleteTarget(iTarget);
+                    return 0;
+                }
+
+                g_MovementSkill.m_iTarget = iCharIndex;
+
+                TargetX = (int)(pTarget->Object.Position[0] / TERRAIN_SCALE);
+                TargetY = (int)(pTarget->Object.Position[1] / TERRAIN_SCALE);
+
+                PATH_t tempPath;
+                bool bHasPath = PathFinding2(Hero->PositionX, Hero->PositionY, TargetX, TargetY, &tempPath, m_iHuntingDistance + fSkillDistance);
+                
+                // Target not reachable, ignore it
+                if (!bHasPath)
+                {
+                    DeleteTarget(iTarget);
+                    return 0;
+                }
+
+                const bool bTargetNear = CheckTile(Hero, &Hero->Object, fSkillDistance);
+                if (bTargetNear && !CheckWall(Hero->PositionX, Hero->PositionY, TargetX, TargetY))
+                {
+                    DeleteTarget(iTarget);
+                    return 0;
+                }
+
+                // Target is not yet in range, move closer.
+                if (!bTargetNear)
+                {
+                    Hero->Path.Lock.lock();
+
+                    // Limit movement to 2 steps at a time
+                    int pathNum = std::min<int>(tempPath.PathNum, 2);
+                    for (int i = 0; i < pathNum; i++)
+                    {
+                        Hero->Path.PathX[i] = tempPath.PathX[i];
+                        Hero->Path.PathY[i] = tempPath.PathY[i];
+                    }
+                    Hero->Path.PathNum = pathNum;
+                    Hero->Path.CurrentPath = 0;
+                    Hero->Path.CurrentPathFloat = 0;
+
+                    Hero->Path.Lock.unlock();
+
+                    SendMove(Hero, &Hero->Object);
+                    return 0;
+                }
             }
         }
         else
@@ -913,13 +969,101 @@ namespace MUHelper
             TargetY = Hero->PositionY;
         }
 
-        int iSkillResult = ExecuteSkill(Hero, iSkill, fSkillDistance);
-        if (iSkillResult == -1)
+        int iSkillResult = GameLogic::Combat::ExecuteSkill(Hero, iSkill, fSkillDistance);
+        if (iSkillResult == -1 && iTarget != -1)
         {
             DeleteTarget(iTarget);
         }
 
         return (int)(iSkillResult == 1);
+    }
+
+    int CMuHelper::SimulateBasicAttack(int iTarget)
+    {
+        if (iTarget == -1)
+        {
+            return 0;
+        }
+
+        // Let the current swing finish before attacking again, so the cadence
+        // tracks AttackSpeed instead of the fixed helper timer.
+        if (IsHeroSwingInProgress())
+        {
+            return 0;
+        }
+
+        const int iCharIndex = FindCharacterIndex(iTarget);
+        if (iCharIndex == MAX_CHARACTERS_CLIENT)
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        CHARACTER* pTarget = &CharactersClient[iCharIndex];
+        if (pTarget->Dead > 0 || !IsMonster(pTarget))
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        constexpr float BASIC_RANGE_DEFAULT = 1.8f;
+        constexpr float BASIC_RANGE_SPEAR = 2.2f;
+        constexpr float BASIC_RANGE_BOW = 6.0f;
+
+        float fRange = BASIC_RANGE_DEFAULT;
+        const int iWeaponRight = CharacterMachine->Equipment[EQUIPMENT_WEAPON_RIGHT].Type;
+        if (iWeaponRight >= ITEM_SPEAR && iWeaponRight < ITEM_SPEAR + MAX_ITEM_INDEX)
+        {
+            fRange = BASIC_RANGE_SPEAR;
+        }
+        if (gCharacterManager.GetEquipedBowType() != BOWTYPE_NONE)
+        {
+            fRange = BASIC_RANGE_BOW;
+        }
+
+        SelectedCharacter = iCharIndex;
+        TargetX = (int)(pTarget->Object.Position[0] / TERRAIN_SCALE);
+        TargetY = (int)(pTarget->Object.Position[1] / TERRAIN_SCALE);
+
+        PATH_t tempPath;
+        const bool bHasPath = PathFinding2(Hero->PositionX, Hero->PositionY, TargetX, TargetY, &tempPath, m_iHuntingDistance + fRange);
+        if (!bHasPath)
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        const bool bTargetNear = CheckTile(Hero, &Hero->Object, fRange);
+        if (bTargetNear && !CheckWall(Hero->PositionX, Hero->PositionY, TargetX, TargetY))
+        {
+            DeleteTarget(iTarget);
+            return 0;
+        }
+
+        // Target is not yet in range, move closer.
+        if (!bTargetNear)
+        {
+            Hero->Path.Lock.lock();
+            const int pathNum = std::min<int>(tempPath.PathNum, 2);
+            for (int i = 0; i < pathNum; i++)
+            {
+                Hero->Path.PathX[i] = tempPath.PathX[i];
+                Hero->Path.PathY[i] = tempPath.PathY[i];
+            }
+            Hero->Path.PathNum = pathNum;
+            Hero->Path.CurrentPath = 0;
+            Hero->Path.CurrentPathFloat = 0;
+            Hero->Path.Lock.unlock();
+
+            SendMove(Hero, &Hero->Object);
+            return 0;
+        }
+
+        Hero->MovementType = MOVEMENT_ATTACK;
+        ActionTarget = iCharIndex;
+        Attacking = 1;
+        Action(Hero, &Hero->Object, true);
+        return 1;
     }
 
     int CMuHelper::Regroup()
@@ -990,6 +1134,20 @@ namespace MUHelper
         return AT_SKILL_UNDEFINED;
     }
 
+    // Matches AttackWizard() behavior in ZzzInterface.cpp for these skill IDs.
+    bool CMuHelper::IsSelfPositionSkill(ActionSkillType iSkill)
+    {
+        return (
+            iSkill == AT_SKILL_NOVA_BEGIN ||
+            iSkill == AT_SKILL_NOVA ||
+            iSkill == AT_SKILL_HELL_FIRE ||
+            iSkill == AT_SKILL_HELL_FIRE_STR ||
+            iSkill == AT_SKILL_INFERNO ||
+            iSkill == AT_SKILL_INFERNO_STR ||
+            iSkill == AT_SKILL_INFERNO_STR_MG
+        );
+    }
+
     ActionSkillType CMuHelper::GetDrainLifeSkill()
     {
         std::vector<ActionSkillType> aiDrainLifeSkills =
@@ -1022,7 +1180,6 @@ namespace MUHelper
         }
 
         ITEM_t* pDrop = &Items[m_iCurrentItem];
-        ITEM* pItem = &pDrop->Item;
 
         if (!pDrop->Object.Live)
         {
@@ -1036,7 +1193,7 @@ namespace MUHelper
         int iDistance = ComputeDistanceBetween({ Hero->PositionX, Hero->PositionY }, { TargetX, TargetY });
         if (iDistance <= m_iObtainingDistance)
         {
-            if (!CheckTile(Hero, &Hero->Object, 1.5f))
+            if (!CheckTile(Hero, &Hero->Object, 2.0f))
             {
                 if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
                 {
@@ -1047,8 +1204,12 @@ namespace MUHelper
             }
             else
             {
-                SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
-                DeleteItem(m_iCurrentItem);
+                if (SendGetItem == -1)
+                {
+                    SendGetItem = m_iCurrentItem;
+                    SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
+                    DeleteItem(m_iCurrentItem);
+                }
             }
         }
 
@@ -1107,7 +1268,7 @@ namespace MUHelper
     int CMuHelper::SelectItemToObtain()
     {
         int iClosestItemId = MAX_ITEMS;
-        int iMinDistance = m_config.iObtainingRange + 1;
+        int iMinDistance = m_config.iObtainingRange;
 
         std::set<int> setItems;
         {
@@ -1127,7 +1288,7 @@ namespace MUHelper
             int iItemY = (int)(Items[iItemId].Object.Position[1] / TERRAIN_SCALE);
 
             int iDistance = ComputeDistanceBetween({ Hero->PositionX, Hero->PositionY }, { iItemX, iItemY });
-            if (iDistance < iMinDistance)
+            if (iDistance <= iMinDistance)
             {
                 iMinDistance = iDistance;
                 iClosestItemId = iItemId;

@@ -5,17 +5,17 @@
 #include "ItemEditorColumns.h"
 #include "ItemEditorTable.h"
 #include "../MuEditor/UI/Console/MuEditorConsoleUI.h"
-#include "GameData/ItemData/ItemFieldDefs.h"
-#include "Translation/i18n.h"
-#include "_struct.h"
-#include "_define.h"
+#include "Data/GameData/ItemData/ItemFieldDefs.h"
+#include "I18N/All.h"
+#include "Core/Globals/_struct.h"
+#include "Core/Globals/_define.h"
 #include "imgui.h"
 #include <algorithm>
 #include <sstream>
 
 #include "ItemEditorTable.h"
 #include "../Console/MuEditorConsoleUI.h"
-#include "GameData/ItemData/ItemFieldMetadata.h"
+#include "Data/GameData/ItemData/ItemFieldMetadata.h"
 #include "../MuEditor/UI/ItemEditor/ItemEditorColumns.h"
 
 extern ITEM_ATTRIBUTE* ItemAttribute;
@@ -224,7 +224,7 @@ void CItemEditorColumns::RenderIndexColumn(int& colIdx, int itemIndex, bool& row
         }
         else if (!m_errorLogged)
         {
-            std::string errorMsg = i18n::FormatEditor("error_index_in_use", {
+            std::string errorMsg = I18N::Format(I18N::Editor::ErrorIndex0AlreadyInUse, {
                 std::to_string(newIndex)
             });
             g_MuEditorConsoleUI.LogEditor(errorMsg);

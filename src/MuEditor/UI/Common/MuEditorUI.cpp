@@ -7,7 +7,10 @@
 #include "imgui.h"
 #include "../MuEditor/Core/MuEditorCore.h"
 #include "../MuEditor/Config/MuEditorConfig.h"
-#include "Translation/i18n.h"
+#include "Data/GameConfig/GameConfig.h"
+#include "I18N/All.h"
+
+#include <cstring>
 #include "../MuEditor/UI/Console/MuEditorConsoleUI.h"
 
 // UI Layout constants
@@ -23,11 +26,11 @@ CMuEditorUI& CMuEditorUI::GetInstance()
     return instance;
 }
 
-void CMuEditorUI::RenderToolbar(bool& editorEnabled, bool& showItemEditor, bool& showSkillEditor)
+void CMuEditorUI::RenderToolbar(bool& editorEnabled, bool& showItemEditor, bool& showSkillEditor, bool& showDevEditor, bool& showConsole)
 {
     if (editorEnabled)
     {
-        RenderToolbarFull(editorEnabled, showItemEditor, showSkillEditor);
+        RenderToolbarFull(editorEnabled, showItemEditor, showSkillEditor, showDevEditor, showConsole);
     }
     else
     {
@@ -109,7 +112,7 @@ void CMuEditorUI::RenderToolbarOpen(bool& editorEnabled)
     ImGui::PopStyleColor(2);
 }
 
-void CMuEditorUI::RenderToolbarFull(bool& editorEnabled, bool& showItemEditor, bool& showSkillEditor)
+void CMuEditorUI::RenderToolbarFull(bool& editorEnabled, bool& showItemEditor, bool& showSkillEditor, bool& showDevEditor, bool& showConsole)
 {
     ImGui::SetNextWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, TOOLBAR_HEIGHT), ImGuiCond_Always);
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
@@ -144,52 +147,45 @@ void CMuEditorUI::RenderToolbarFull(bool& editorEnabled, bool& showItemEditor, b
             showSkillEditor = !showSkillEditor;
         }
 
+        ImGui::SameLine();
+        if (ImGui::Button("Dev Editor"))
+        {
+            showDevEditor = !showDevEditor;
+        }
+
+        // Console toggle
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Console", &showConsole))
+        {
+            // Toggle is handled by reference
+        }
+
         // Language selector
         ImGui::SameLine();
         ImGui::SetNextItemWidth(100.0f);
 
-        i18n::Translator& translator = i18n::Translator::GetInstance();
-        const std::string& currentLocale = translator.GetLocale();
+        const char* currentLocale = I18N::GetCurrentLocale();
+        std::span<const char* const> availableLocales = I18N::GetAvailableLocales();
 
-        // Get available locales dynamically from translation directories
-        static std::vector<std::string> availableLocales = translator.GetAvailableLocales();
+        const char* currentLanguageName = I18N::GetLanguageDisplayName(currentLocale);
 
-        // Find current language index
-        int currentIndex = 0;
-        for (size_t i = 0; i < availableLocales.size(); i++)
-        {
-            if (currentLocale == availableLocales[i])
-            {
-                currentIndex = static_cast<int>(i);
-                break;
-            }
-        }
-
-        // Get display name for current language from translation file
-        std::string currentLanguageName = translator.GetLanguageDisplayName(currentLocale);
-
-        if (ImGui::BeginCombo("##Language", currentLanguageName.c_str()))
+        if (ImGui::BeginCombo("##Language", currentLanguageName))
         {
             for (size_t i = 0; i < availableLocales.size(); i++)
             {
-                const bool isSelected = (currentIndex == static_cast<int>(i));
-                std::string displayName = translator.GetLanguageDisplayName(availableLocales[i]);
+                const char* locale = availableLocales[i];
+                const bool isSelected = (std::strcmp(locale, currentLocale) == 0);
+                const char* displayName = I18N::GetLanguageDisplayName(locale);
 
-                if (ImGui::Selectable(displayName.c_str(), isSelected))
+                if (ImGui::Selectable(displayName, isSelected))
                 {
-                    // Language changed
-                    if (translator.SwitchLanguage(availableLocales[i]))
-                    {
-                        // Save language preference to config
-                        g_MuEditorConfig.SetLanguage(availableLocales[i]);
-                        g_MuEditorConfig.Save();
-
-                        g_MuEditorConsoleUI.LogEditor(std::string("Language switched to: ") + displayName);
-                    }
-                    else
-                    {
-                        g_MuEditorConsoleUI.LogEditor(std::string("Failed to load translations for: ") + displayName);
-                    }
+                    I18N::SetLocale(locale);
+                    // Persist to GameConfig.UILocale so the game options
+                    // window and editor stay in sync across restarts.
+                    std::wstring wide(locale, locale + std::strlen(locale));
+                    GameConfig::GetInstance().SetUILocale(wide);
+                    GameConfig::GetInstance().Save();
+                    g_MuEditorConsoleUI.LogEditor(std::string("Language switched to: ") + displayName);
                 }
 
                 if (isSelected)

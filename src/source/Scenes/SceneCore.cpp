@@ -2,10 +2,10 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
-#include "ZzzOpenglUtil.h"
-#include "ZzzInfomation.h"
-#include "ZzzInterface.h"
-#include "ZzzTexture.h"
+#include "Render/Textures/ZzzOpenglUtil.h"
+#include "Engine/Object/ZzzInfomation.h"
+#include "Engine/Object/ZzzInterface.h"
+#include "Render/Textures/ZzzTexture.h"
 #include "SceneCore.h"
 
 #ifdef _EDITOR
@@ -13,17 +13,17 @@
 #include "imgui.h"
 #endif
 
-#include "PhysicsManager.h"
+#include "Engine/Physics/PhysicsManager.h"
 
-#include "CSQuest.h"
-#include "UIControls.h"
-#include "UIMapName.h"	// rozy
-#include "./Time/Timer.h"
-#include "UIMng.h"
+#include "GameLogic/Quests/CSQuest.h"
+#include "UI/Legacy/UIControls.h"
+#include "UI/Legacy/UIMapName.h"	// rozy
+#include "Core/Time/Timer.h"
+#include "UI/Legacy/UIMng.h"
 #include "LoadingScene.h"
-#include "CDirection.h"
+#include "GameLogic/Events/Cinematic/CDirection.h"
 
-#include "NewUISystem.h"
+#include "UI/NewUI/NewUISystem.h"
 #include <chrono>
 #include <thread>
 
@@ -62,8 +62,6 @@ extern int g_iKeyPadEnable;
 
 CPhysicsManager g_PhysicsManager;
 
-extern wchar_t Mp3FileName[256];
-
 #define MAX_LENGTH_CMB	( 38)
 
 DWORD   g_dwWaitingStartTick;
@@ -90,7 +88,7 @@ extern int HeroKey;
 
 int DeleteGuildIndex = -1;
 
-int  ErrorMessage = NULL;
+int  ErrorMessage = 0;
 extern bool g_bEnterPressed;
 
 extern wchar_t LogInID[MAX_USERNAME_SIZE + 1];
@@ -104,14 +102,7 @@ extern BOOL g_bIMEBlock;
 
 bool MoveMainCamera();
 
-// Legacy global variables (kept for backward compatibility)
-float CameraDistanceTarget = 1000.f;
-float CameraDistance = 1000.f;
-float Camera3DFov = 0.f;
-bool Camera3DRoll = false;
-
-// Camera state structure instance (uses legacy variables via references)
-CameraState g_CameraState;
+// Note: Camera variables now in g_Camera (see backward compatibility layer in ZzzOpenglUtil.h)
 
 extern int WaterTextureNumber;
 

@@ -2,8 +2,8 @@
 
 #ifdef _EDITOR
 
-#include "GameData/SkillData/SkillFieldMetadata.h"
-#include "_struct.h"
+#include "Data/GameData/SkillData/SkillFieldMetadata.h"
+#include "Core/Globals/_struct.h"
 #include <string>
 
 // Handles Save/Export action buttons for the Skill Editor

@@ -11,8 +11,8 @@
 #include "stdafx.h"
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "WZResult.h"
-#include <crtdbg.h>
-#include <strsafe.h>
+#include "Core/Platform/CrtDbg.h"
+#include "Core/Platform/StrSafe.h"
 
 WZResult::WZResult() // OK
 {

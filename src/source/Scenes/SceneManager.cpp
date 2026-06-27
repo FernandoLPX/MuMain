@@ -3,10 +3,13 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "Core/Input/KeyState.h"
 #include <vector>
 #include <algorithm>
 #include <numeric>
 #include "SceneManager.h"
+#include "Core/Utilities/FrameProfiler.h"
+#include "Core/Utilities/PlatformInfo.h"
 
 //=============================================================================
 // Frame Timing State Implementation
@@ -24,20 +27,25 @@ FrameTimingState g_frameTiming;
 #include "CharacterScene.h"
 #include "MainScene.h"
 #include "LoadingScene.h"
-#include "../DSPlaySound.h"
-#include "../ZzzOpenglUtil.h"
-#include "../PhysicsManager.h"
-#include "../Time/Timer.h"
-#include "../Input.h"
-#include "../UIMng.h"
-#include "../WSclient.h"
-#include "../w_CursedTemple.h"
-#include "../ServerListManager.h"
-#include "../NewUISystem.h"
-#include "../ZzzInterface.h"
-#include "../GlobalText.h"
-#include "../ZzzAI.h"
-#include "../Winmain.h"
+#include "Audio/DSPlaySound.h"
+#include "Render/Textures/ZzzOpenglUtil.h"
+#include "Engine/Physics/PhysicsManager.h"
+#include "Core/Time/Timer.h"
+#include "Core/Input/Input.h"
+#include "UI/Legacy/UIMng.h"
+#include "Network/Server/WSclient.h"
+#include "Network/Reconnect/ReconnectManager.h"
+#include "UI/NewUI/Dialogs/ReconnectDialog.h"
+#include "GameLogic/Events/w_CursedTemple.h"
+#include "Network/Server/ServerListManager.h"
+#include "UI/NewUI/NewUISystem.h"
+#include "Engine/Object/ZzzInterface.h"
+#include "UI/NewUI/HUD/Notices.h"
+#include "I18N/All.h"
+#include "Engine/AI/ZzzAI.h"
+#include "App/Platform/Windows/Winmain.h"
+#include "Camera/CameraManager.h"
+#include "Camera/CameraMode.h"
 
 #ifdef _EDITOR
 #include "../MuEditor/Core/MuEditorCore.h"
@@ -190,12 +198,12 @@ static void GenerateScreenshotFilename(wchar_t* outFileName, wchar_t* outMessage
 {
     SYSTEMTIME st;
     GetLocalTime(&st);
-    swprintf(outFileName, L"Screen(%02d_%02d-%02d_%02d)-%04d.jpg",
+    mu_swprintf(outFileName, L"Screen(%02d_%02d-%02d_%02d)-%04d.jpg",
         st.wMonth, st.wDay, st.wHour, st.wMinute, GrabScreen);
-    swprintf(outMessage, GlobalText[459], outFileName);
+    mu_swprintf(outMessage, I18N::Game::SScreenshotSaved, outFileName);
 
     wchar_t lpszTemp[64];
-    swprintf(lpszTemp, L" [%ls / %ls]", g_ServerListManager->GetSelectServerName(), Hero->ID);
+    mu_swprintf(lpszTemp, L" [%ls / %ls]", g_ServerListManager->GetSelectServerName(), Hero->ID);
     wcscat(outMessage, lpszTemp);
 }
 
@@ -227,7 +235,7 @@ static void HandleScreenshotCapture()
         return;
     }
 
-    const bool addTimeStampToCapture = !HIBYTE(GetAsyncKeyState(VK_SHIFT));
+    const bool addTimeStampToCapture = !Core::Input::IsKeyDown(VK_SHIFT);
     wchar_t screenshotText[256];
 
     GenerateScreenshotFilename(GrabFileName, screenshotText);
@@ -277,7 +285,7 @@ void UpdateSceneState()
     g_dwMouseUseUIID = 0;
 
     UpdateActiveScene();
-    MoveNotices();
+    UI::Notices::Move();
     HandleScreenshotCapture();
 }
 
@@ -325,49 +333,58 @@ static void UpdateCoreSystems()
 }
 
 /**
+ * @brief Sets both the OpenGL clear color and the global fog color to the same RGB.
+ *
+ * Every world uses the fog color as its clear color, so this keeps them in sync
+ * and avoids duplicating the two assignments at every call site.
+ */
+static void SetClearAndFogColor(float r, float g, float b)
+{
+    extern GLfloat FogColor[4];
+    glClearColor(r, g, b, 1.f);
+    FogColor[0] = r;
+    FogColor[1] = g;
+    FogColor[2] = b;
+    FogColor[3] = 1.f;
+}
+
+/**
  * @brief Sets the OpenGL clear color based on the current world/map.
  *
  * Different maps have different background colors for visual atmosphere.
  */
 static void SetWorldClearColor()
 {
-    if (gMapManager.WorldActive == WD_10HEAVEN)
-    {
-        glClearColor(3.f / 256.f, 25.f / 256.f, 44.f / 256.f, 1.f);
-    }
-    else if (gMapManager.WorldActive == WD_73NEW_LOGIN_SCENE || gMapManager.WorldActive == WD_74NEW_CHARACTER_SCENE)
-    {
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    }
-    else if (gMapManager.InHellas(gMapManager.WorldActive))
-    {
-        glClearColor(30.f / 256.f, 40.f / 256.f, 40.f / 256.f, 1.f);
-    }
-    else if (gMapManager.InChaosCastle() == true)
-    {
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-    }
+    // Convenience: build a 0-255 color at call site; dividing by 256 matches legacy values.
+    constexpr float BYTE_TO_FLOAT = 1.f / 256.f;
+    auto rgb8 = [](int r, int g, int b) {
+        SetClearAndFogColor(r * BYTE_TO_FLOAT, g * BYTE_TO_FLOAT, b * BYTE_TO_FLOAT);
+    };
+
+    const int world = gMapManager.WorldActive;
+
+    if (world == WD_0LORENCIA)
+        rgb8(10, 20, 14);                              // Dark green
+    else if (world == WD_2DEVIAS)
+        SetClearAndFogColor(0.75f, 0.85f, 1.0f);       // Light snowy blue
+    else if (world == WD_10HEAVEN)
+        rgb8(3, 25, 44);                               // Blue
+    else if (world == WD_73NEW_LOGIN_SCENE || world == WD_74NEW_CHARACTER_SCENE)
+        SetClearAndFogColor(0.f, 0.f, 0.f);            // Black
+    else if (gMapManager.InHellas(world))
+        rgb8(30, 40, 40);                              // Teal
+    else if (gMapManager.InChaosCastle())
+        SetClearAndFogColor(0.f, 0.f, 0.f);            // Black
     else if (gMapManager.InBattleCastle() && battleCastle::InBattleCastle2(Hero->Object.Position))
-    {
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-    }
-    else if (gMapManager.WorldActive >= WD_45CURSEDTEMPLE_LV1 && gMapManager.WorldActive <= WD_45CURSEDTEMPLE_LV6)
-    {
-        glClearColor(9.f / 256.f, 8.f / 256.f, 33.f / 256.f, 1.f);
-    }
-    else if (gMapManager.WorldActive == WD_51HOME_6TH_CHAR
-        )
-    {
-        glClearColor(178.f / 256.f, 178.f / 256.f, 178.f / 256.f, 1.f);
-    }
-    else if (gMapManager.WorldActive == WD_65DOPPLEGANGER1)
-    {
-        glClearColor(148.f / 256.f, 179.f / 256.f, 223.f / 256.f, 1.f);
-    }
+        SetClearAndFogColor(0.f, 0.f, 0.f);            // Black
+    else if (world >= WD_45CURSEDTEMPLE_LV1 && world <= WD_45CURSEDTEMPLE_LV6)
+        rgb8(9, 8, 33);                                // Dark purple
+    else if (world == WD_51HOME_6TH_CHAR)
+        rgb8(178, 178, 178);                           // Gray
+    else if (world == WD_65DOPPLEGANGER1)
+        rgb8(148, 179, 223);                           // Light blue
     else
-    {
-        glClearColor(0 / 256.f, 0 / 256.f, 0 / 256.f, 1.f);
-    }
+        SetClearAndFogColor(0.f, 0.f, 0.f);            // Black (default)
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -411,10 +428,10 @@ static void RenderFrameGraph(float graphX, float graphY, float graphW, float gra
         return;
 
     // Convert virtual 640x480 coords to actual window pixels
-    float gx = graphX * (float)WindowWidth / 640.f;
-    float gy = graphY * (float)WindowHeight / 480.f;
-    float gw = graphW * (float)WindowWidth / 640.f;
-    float gh = graphH * (float)WindowHeight / 480.f;
+    float gx = graphX * (float)WindowWidth / (float)REFERENCE_WIDTH;
+    float gy = graphY * (float)WindowHeight / (float)REFERENCE_HEIGHT;
+    float gw = graphW * (float)WindowWidth / (float)REFERENCE_WIDTH;
+    float gh = graphH * (float)WindowHeight / (float)REFERENCE_HEIGHT;
 
     // Flip Y for OpenGL (origin bottom-left)
     float glBottom = (float)WindowHeight - gy - gh;
@@ -493,20 +510,78 @@ static void RenderDebugInfo()
     g_pRenderText->SetTextColor(255, 255, 255, 200);
 
     int y = DEBUG_TEXT_Y_START;
-    swprintf(szLine, L"FPS: %.1f  Avg: %.1f  Max: %.1f  Vsync: %d  CPU: %.1f%%",
+    mu_swprintf(szLine, L"FPS: %.1f  Avg: %.1f  Max: %.1f  Vsync: %d  CPU: %.1f%%",
         FPS_AVG, s_avgFps, s_highestFps, IsVSyncEnabled(), CPU_AVG);
     g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
 
-    swprintf(szLine, L"1%% Low: %.1f  Slowest: %.1f  Frame: %.2fms",
+    mu_swprintf(szLine, L"1%% Low: %.1f  Slowest: %.1f  Frame: %.2fms",
         s_onePercentLow, s_slowestFrameFps,
         (s_avgFps > 0.0f) ? 1000.0f / s_avgFps : 0.0f);
     g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
 
-    swprintf(szLine, L"MousePos: %d %d %d", MouseX, MouseY, MouseLButtonPush);
+    mu_swprintf(szLine, L"MousePos: %d %d %d", MouseX, MouseY, MouseLButtonPush);
     g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
 
-    swprintf(szLine, L"Camera3D: %.1f %.1f:%.1f:%.1f", CameraFOV, CameraAngle[0], CameraAngle[1], CameraAngle[2]);
+    mu_swprintf(szLine, L"Camera3D: %.1f %.1f:%.1f:%.1f", g_Camera.FOV, g_Camera.Angle[0], g_Camera.Angle[1], g_Camera.Angle[2]);
     g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
+
+    // Compile-time build info: configuration, feature flags, compiler, arch,
+    // and the binary's build timestamp. Useful for verifying which build is
+    // actually running without having to check executable metadata.
+    constexpr const char* kBuildType =
+#if defined(_DEBUG) || defined(DEBUG)
+        "Debug";
+#else
+        "Release";
+#endif
+    constexpr const char* kEditor =
+#ifdef _EDITOR
+        "Editor";
+#else
+        "NoEditor";
+#endif
+    constexpr const char* kCompiler =
+#if defined(__MINGW32__) || defined(__MINGW64__)
+        "MinGW";
+#elif defined(__clang__)
+        "Clang";
+#elif defined(_MSC_VER)
+        "MSVC";
+#elif defined(__GNUC__)
+        "GCC";
+#else
+        "Unknown";
+#endif
+    constexpr const char* kArch =
+#if defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__)
+        "x64";
+#else
+        "x86";
+#endif
+    mu_swprintf(szLine, L"Build: %hs %hs %hs %hs  %hs %hs",
+             kBuildType, kEditor, kCompiler, kArch, __DATE__, __TIME__);
+    g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
+
+    // Runtime OS name and version (compile-time arch above doesn't capture which
+    // OS build the binary is actually running on).
+    mu_swprintf(szLine, L"OS: %ls", Core::Platform::GetOSVersionString().c_str());
+    g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
+
+    // Active camera mode (cycled with F9).
+    mu_swprintf(szLine, L"Camera: %hs", CameraModeToString(CameraManager::Instance().GetCurrentMode()));
+    g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
+
+    // Per-pass frame timing (ms) — accumulated by FRAME_PROFILE scopes around the
+    // major render passes in MainScene. Reset just below so next frame starts fresh.
+    using FP = FrameProfiler::Pass;
+    mu_swprintf(szLine, L"Frame ms  T:%5.2f  O:%5.2f  C:%5.2f  I:%5.2f  E:%5.2f",
+             FrameProfiler::AccumulatorMs(FP::Terrain),
+             FrameProfiler::AccumulatorMs(FP::Objects),
+             FrameProfiler::AccumulatorMs(FP::Characters),
+             FrameProfiler::AccumulatorMs(FP::Items),
+             FrameProfiler::AccumulatorMs(FP::Effects));
+    g_pRenderText->RenderText((int)DEBUG_TEXT_X, y, szLine); y += DEBUG_TEXT_LINE_HEIGHT;
+    FrameProfiler::ResetFrame();
 
     // Frame time graph below text
     RenderFrameGraph(DEBUG_TEXT_X, (float)y + DEBUG_GRAPH_Y_OFFSET, DEBUG_GRAPH_WIDTH, DEBUG_GRAPH_HEIGHT);
@@ -530,7 +605,7 @@ static void RenderFpsCounter()
     g_pRenderText->SetBgColor(0, 0, 0, 100);
     g_pRenderText->SetTextColor(255, 255, 255, 200);
 
-    swprintf(szLine, L"FPS: %.1f", FPS_AVG);
+    mu_swprintf(szLine, L"FPS: %.1f", FPS_AVG);
     g_pRenderText->RenderText((int)DEBUG_TEXT_X, DEBUG_TEXT_Y_START, szLine);
 
     g_pRenderText->SetFont(g_hFont);
@@ -542,17 +617,39 @@ static void RenderFpsCounter()
  */
 static void CheckServerConnection()
 {
-    if (SocketClient == nullptr || !SocketClient->IsConnected())
+    if (SocketClient != nullptr && SocketClient->IsConnected())
     {
-        static BOOL s_bClosed = FALSE;
-        if (!s_bClosed)
-        {
-            s_bClosed = TRUE;
-            g_ErrorReport.Write(L"> Connection closed. ");
-            g_ErrorReport.WriteCurrentTime();
-            g_ConsoleDebug->Write(MCD_NORMAL, L"Connection closed");
-            CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
-        }
+        return;
+    }
+
+    // A reconnect already in progress manages its own connection attempts.
+    if (ReconnectManager::Instance().IsActive())
+    {
+        return;
+    }
+
+    // Auto-reconnect only makes sense in-game, where the server restores the
+    // character's saved position. Other scenes keep the original behaviour.
+    if (SceneFlag == MAIN_SCENE && ReconnectManager::Instance().HasSession())
+    {
+        g_ErrorReport.Write(L"> Connection lost in game - starting auto-reconnect. ");
+        g_ErrorReport.WriteCurrentTime();
+        g_ConsoleDebug->Write(MCD_NORMAL, L"Connection lost in game - starting auto-reconnect");
+        // Grab the clean game frame now (front buffer, dialog not yet drawn) so
+        // the brief re-login phase shows it frozen instead of a black screen.
+        UI::Reconnect::CaptureBackground();
+        ReconnectManager::Instance().RequestBegin();
+        return;
+    }
+
+    static BOOL s_bClosed = FALSE;
+    if (!s_bClosed)
+    {
+        s_bClosed = TRUE;
+        g_ErrorReport.Write(L"> Connection closed. ");
+        g_ErrorReport.WriteCurrentTime();
+        g_ConsoleDebug->Write(MCD_NORMAL, L"Connection closed");
+        CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
     }
 }
 
@@ -918,6 +1015,7 @@ void MainScene(HDC hDC)
         Success = RenderCurrentScene(hDC);
         RenderDebugInfo();
         RenderFpsCounter();
+        UI::Reconnect::RenderDialog();
 
         if (Success)
         {
@@ -934,7 +1032,7 @@ void MainScene(HDC hDC)
                 EndBitmap();
             }
 #endif
-            SwapBuffers(hDC);
+            PlatformSwapBuffers();
         }
 
         CheckServerConnection();
@@ -953,6 +1051,11 @@ void RenderScene(HDC hDC)
 {
     CalcFPS();
     UpdateSceneState();
+
+    // Drive auto-reconnect after the scene loops have advanced this frame. It
+    // runs across all scenes because reconnect passes through the login,
+    // character and loading scenes on its way back into the game.
+    ReconnectManager::Instance().Update();
 
     g_frameTiming.MarkFrameRendered();
 
