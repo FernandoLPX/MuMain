@@ -301,11 +301,11 @@ void CreateLogInScene()
     InputNumber = 2;
     InputTextHide[1] = 1;
 
-    // FIX: Enable tour mode with offset correction
-    // Tour mode waypoints work well for movement, but need position offset
-    // Offset is applied in CCameraMove::GetCurrentCameraPos()
-    CCameraMove::GetInstancePtr()->PlayCameraWalk(Hero->Object.Position, 1000);
-    CCameraMove::GetInstancePtr()->SetTourMode(TRUE, FALSE, 0);  // Start from waypoint 0
+    // World 73 loads CWScript73.cws, so the login scene uses the scripted tour camera.
+    // Use a sane initial distance level (10.0) so DefaultCamera doesn't apply a
+    // 110 000-unit orbit offset before the waypoints update the level.
+    CCameraMove::GetInstancePtr()->PlayCameraWalk(Hero->Object.Position, 10.0f);
+    CCameraMove::GetInstancePtr()->SetTourMode(TRUE, FALSE, 1);
 
     MoveMainCamera();
 
@@ -367,16 +367,12 @@ bool NewRenderLogInScene(HDC hDC)
 {
     if (!InitLogIn) return false;
 
-    FogEnable = true;
+    FogEnable = false;
+
+    MoveMainCamera();
 
     vec3_t pos;
     VectorCopy(g_Camera.Position, pos);
-    if (CCameraMove::GetInstancePtr()->IsCameraMove())
-    {
-        VectorCopy(g_Camera.Position, pos);
-    }
-
-    MoveMainCamera();
 
     // Play login music (called every frame — PlayMp3 no-ops if already playing)
     ::PlayMp3(MUSIC_LOGIN_THEME);
@@ -389,25 +385,20 @@ bool NewRenderLogInScene(HDC hDC)
     Width = GetScreenWidth();
     glClearColor(0.f, 0.f, 0.f, 1.f);
 
-    // Set ViewFar BEFORE BeginOpengl so the projection matrix covers the full render distance
-#ifdef _EDITOR
-    g_Camera.ViewFar = DevEditor_GetLoginTerrainDist();
-#else
-    g_Camera.ViewFar = LoginSceneCameraDefaults::RENDER_TERRAIN_DIST;
-#endif
-    g_Camera.ViewNear = 100.f;  // Push near plane out to preserve z-buffer precision
+    BeginOpengl(0, 25, 640, 430);
 
-    BeginOpengl(0, 25, REFERENCE_WIDTH, 430);
-
-    // LoginScene doesn't call CreateFrustrum (DefaultCamera tour mode angles differ from
-    // legacy hardcoded values). Instead, TestFrustrum2D is bypassed for LOG_IN_SCENE and
-    // we reset iteration bounds to cover the full terrain so stale bounds from other scenes
-    // don't restrict the render loop.
+    CreateFrustrum((float)Width / (float)640, (float)Height / 480.f, pos);
     ResetFrustrumBoundsFullTerrain();
 
     if (!CUIMng::Instance().m_CreditWin.IsShow())
     {
+#ifdef _EDITOR
+        g_Camera.ViewFar = DevEditor_GetLoginTerrainDist();
+#else
+        g_Camera.ViewFar = LoginSceneCameraDefaults::RENDER_TERRAIN_DIST;
+#endif
         RenderTerrain(false);
+        g_Camera.ViewFar = LoginSceneCameraDefaults::RENDER_OBJECT_DIST;
         RenderCharactersClient();
         RenderMount();
         RenderObjects();

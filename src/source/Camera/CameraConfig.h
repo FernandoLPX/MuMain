@@ -40,6 +40,12 @@ constexpr float RENDER_DISTANCE_MULTIPLIER = 1.4f;
  * the camera on this screen). Both DefaultCamera and OrbitalCamera need these values:
  * DefaultCamera snaps to them directly, OrbitalCamera uses them as a ray-cast origin
  * to compute where to place the orbit pivot.
+ *
+ * Para o cenário clássico 0.97 (barco com DK/DW):
+ *   Ajuste POSITION_X/Y para onde o barco está no World74.
+ *   POSITION_Z controla a altura da câmera.
+ *   ANGLE_PITCH controla inclinação vertical (-90=para baixo, 0=horizontal).
+ *   ANGLE_ROLL controla a rotação horizontal (yaw).
  */
 namespace CharacterSceneCamera
 {

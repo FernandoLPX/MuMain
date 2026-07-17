@@ -2187,7 +2187,8 @@ void CreateFrustrum2D(vec3_t Position)
 
 bool TestFrustrum2D(float x, float y, float Range)
 {
-    if (SceneFlag == SERVER_LIST_SCENE || SceneFlag == WEBZEN_SCENE || SceneFlag == LOADING_SCENE)
+    if (SceneFlag == SERVER_LIST_SCENE || SceneFlag == WEBZEN_SCENE || SceneFlag == LOADING_SCENE
+        || SceneFlag == LOG_IN_SCENE)
         return true;
 
     int j = 3;

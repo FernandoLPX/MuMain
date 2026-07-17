@@ -4,16 +4,20 @@
 #include <string>
 #include <vector>
 
-// LoginScene camera offset defaults (empirically tuned to correct outdated
-// waypoint-file coordinates on the current LoginScene terrain).
-// See CameraMove.cpp for details.
+// LoginScene camera offset defaults.
+// WD_73NEW_LOGIN_SCENE (= 73) usa iMapWorld = 74, portanto:
+//   - Pasta de dados: Data/World74, Data/Object74
+//   - Script de camera: Data/World74/CWScript74.cws
+// O código original (pre-merge) NÃO tinha offsets — os waypoints do
+// CWScript74.cws já incorporam as posições corretas para a fórmula original.
 namespace LoginSceneCameraDefaults
 {
-    constexpr float OFFSET_X = -300.0f;
-    constexpr float OFFSET_Y =  650.0f;
-    constexpr float OFFSET_Z =  950.0f;
-    constexpr float ANGLE_PITCH = 40.0f;
-    constexpr float ANGLE_YAW   = -5.0f;
+    constexpr float OFFSET_X = 0.0f;
+    constexpr float OFFSET_Y = 0.0f;
+    constexpr float OFFSET_Z = 1000.0f;
+    // ANGLE_PITCH = 0 → ângulo final -112.5° (idêntico ao código original)
+    constexpr float ANGLE_PITCH = 0.0f;
+    constexpr float ANGLE_YAW   = 25.0f;
 
     // Default render distances for LoginScene (tour camera).
     // DevEditor exposes these as sliders; release builds use these as fixed values.

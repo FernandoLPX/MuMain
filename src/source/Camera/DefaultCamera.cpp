@@ -42,7 +42,7 @@ extern "C" void DevEditor_GetDefaultCameraOffset(float* outX, float* outY, float
 namespace
 {
     // LoginScene fallback when no tour waypoints available
-    constexpr float LOGIN_SCENE_FALLBACK_Z = 500.0f;
+    constexpr float LOGIN_SCENE_FALLBACK_Z = 0.0f;
     constexpr float LOGIN_SCENE_FALLBACK_PITCH = -80.0f;
 
     // Sentinel value used to invalidate the frustum cache (forces next-frame rebuild)
@@ -574,15 +574,21 @@ void DefaultCamera::CalculateCameraPosition()
     AngleMatrix(m_State.Angle, Matrix);
     VectorIRotate(Position, Matrix, TransformPosition);
 
-    // Phase 5 fix: Handle tour mode (LoginScene) BEFORE Hero check
+    // Handle tour mode (LoginScene scripted camera path) BEFORE Hero check.
+    // Restaura a fórmula EXATA do CameraUtility.cpp original (pre-merge):
+    //   camera = tourPos + rotate((0,-D,0), angle) + (0,0,-100) + (0,0, D*0.85)
+    // Os waypoints do CWScript74.cws foram calibrados para esta fórmula.
     if (CCameraMove::GetInstancePtr()->IsTourMode())
     {
         CCameraMove::GetInstancePtr()->UpdateTourWayPoint();
         CCameraMove::GetInstancePtr()->GetCurrentCameraPos(Position);
-        m_State.ViewFar = TOUR_VIEWFAR_PER_LEVEL * CCameraMove::GetInstancePtr()->GetCurrentCameraDistanceLevel();
 
-        // Tour mode handles camera completely - set position and return
+        // Original: in tour mode, add (0,0,-100) to TransformPosition
+        TransformPosition[2] -= 100.0f;
         VectorAdd(Position, TransformPosition, m_State.Position);
+
+        // Original: outCameraPosition[2] += CameraDistance * 0.85f
+        m_State.Position[2] += m_State.Distance * 0.85f;
         return;
     }
 
